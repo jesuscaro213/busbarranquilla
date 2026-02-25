@@ -6,6 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # BusBarranquilla — Contexto del Proyecto
 
+## Docker — Cómo correr el proyecto
+
+### Levantar todo
+```bash
+docker-compose up --build
+```
+
+### Solo levantar (sin rebuild)
+```bash
+docker-compose up
+```
+
+### Detener todo
+```bash
+docker-compose down
+```
+
+### Ver logs
+```bash
+docker-compose logs -f backend
+```
+
+## Servicios en Docker
+| Servicio | Puerto | Descripción |
+|---|---|---|
+| backend | 3000 | Servidor Node.js |
+| postgres | 5432 | Base de datos PostgreSQL |
+| redis | 6379 | Tiempo real |
+
+## Importante sobre Docker
+- El proyecto corre con Docker, NO con npm run dev directamente
+- PostgreSQL y Redis viven en contenedores Docker
+- Para desarrollo usar: docker-compose up
+- Las variables de entorno están en docker-compose.yml, no en .env
+- El Dockerfile está en backend/Dockerfile
+
 ## ¿Qué es?
 App móvil colaborativa de transporte público para Barranquilla y el Área Metropolitana. Los usuarios se ayudan entre sí reportando ubicación de buses, trancones, ocupación y más en tiempo real.
 

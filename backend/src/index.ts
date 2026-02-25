@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import pool from './config/database';
 import createTables from './config/schema';
 import authRoutes from './routes/authRoutes';
+import routeRoutes from './routes/routeRoutes';
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ app.use(express.json());
 
 // Rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/routes', routeRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

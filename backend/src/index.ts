@@ -5,21 +5,19 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import pool from './config/database';
 import createTables from './config/schema';
+import authRoutes from './routes/authRoutes';
 
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
-});
 
-// Middlewares
+// Middlewares — SIEMPRE primero
 app.use(cors());
 app.use(express.json());
+
+// Rutas
+app.use('/api/auth', authRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -29,10 +27,16 @@ app.get('/', (req, res) => {
   });
 });
 
-// Socket.io — tiempo real
+// Socket.io
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
 io.on('connection', (socket) => {
   console.log('Usuario conectado:', socket.id);
-
   socket.on('disconnect', () => {
     console.log('Usuario desconectado:', socket.id);
   });
@@ -42,8 +46,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, async () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-  
-  // Probar conexión a base de datos
   try {
     await pool.query('SELECT NOW()');
     await createTables();

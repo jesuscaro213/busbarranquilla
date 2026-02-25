@@ -41,5 +41,22 @@ services:
       - ./backend:/app
       - /app/node_modules
 
+  # Frontend React + Vite
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: busbarranquilla_web
+    environment:
+      # El proxy de Vite reenvía /api/* a este host interno
+      BACKEND_URL: http://backend:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+
 volumes:
   postgres_data:

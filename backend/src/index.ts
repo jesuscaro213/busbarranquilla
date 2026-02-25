@@ -7,6 +7,9 @@ import pool from './config/database';
 import createTables from './config/schema';
 import authRoutes from './routes/authRoutes';
 import routeRoutes from './routes/routeRoutes';
+import stopRoutes from './routes/stopRoutes';
+import reportRoutes from './routes/reportRoutes';
+import creditRoutes from './routes/creditRoutes';
 
 dotenv.config();
 
@@ -20,6 +23,9 @@ app.use(express.json());
 // Rutas
 app.use('/api/auth', authRoutes);
 app.use('/api/routes', routeRoutes);
+app.use('/api/stops', stopRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/credits', creditRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

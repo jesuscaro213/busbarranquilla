@@ -40,20 +40,30 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   # Frontend React + Vite
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY}
     container_name: busbarranquilla_web
     environment:
       # El proxy de Vite reenvía /api/* a este host interno
       BACKEND_URL: http://backend:3000
+      VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY}
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     volumes:
       - ./web:/app
       - /app/node_modules

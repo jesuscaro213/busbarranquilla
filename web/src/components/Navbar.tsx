@@ -36,6 +36,11 @@ export default function Navbar() {
                   PREMIUM
                 </span>
               )}
+              {user.role === 'admin' && (
+                <Link to="/admin" className="hover:text-blue-300 transition-colors">
+                  ⚙️ Administración
+                </Link>
+              )}
               <span className="text-blue-200 hidden md:inline">{user.name}</span>
               <button
                 onClick={handleLogout}

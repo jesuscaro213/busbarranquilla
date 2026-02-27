@@ -1,10 +1,19 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import AdminRoute from './components/AdminRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Map from './pages/Map';
+import AdminLayout from './pages/admin/AdminLayout';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminRoutes from './pages/admin/AdminRoutes';
+import AdminCompanies from './pages/admin/AdminCompanies';
+
+function PublicLayout() {
+  return <><Navbar /><Outlet /></>;
+}
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -21,22 +30,26 @@ function AppRoutes() {
   }
 
   return (
-    <>
-      <Navbar />
-      <Routes>
+    <Routes>
+      {/* Layout público — con Navbar */}
+      <Route element={<PublicLayout />}>
         <Route path="/" element={<Home />} />
         <Route path="/map" element={<Map />} />
-        <Route
-          path="/login"
-          element={user ? <Navigate to="/" replace /> : <Login />}
-        />
-        <Route
-          path="/register"
-          element={user ? <Navigate to="/" replace /> : <Register />}
-        />
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+      </Route>
+
+      {/* Layout admin — con AdminRoute guard + AdminLayout sidebar */}
+      <Route element={<AdminRoute />}>
+        <Route element={<AdminLayout />}>
+          <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
+          <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/admin/routes" element={<AdminRoutes />} />
+          <Route path="/admin/companies" element={<AdminCompanies />} />
+        </Route>
+      </Route>
+    </Routes>
   );
 }
 
@@ -49,4 +62,3 @@ export default function App() {
     </BrowserRouter>
   );
 }
-

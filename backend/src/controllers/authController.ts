@@ -8,7 +8,6 @@ export const register = async (req: Request, res: Response): Promise<void> => {
   const { name, email, password, phone } = req.body;
 
   try {
-    // Verificar si el usuario ya existe
     const userExists = await pool.query(
       'SELECT id FROM users WHERE email = $1',
       [email]
@@ -19,29 +18,25 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Encriptar contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Crear usuario con 14 días premium gratis y 50 créditos iniciales
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, phone, credits, is_premium, trial_expires_at)
-       VALUES ($1, $2, $3, $4, 50, true, NOW() + INTERVAL '14 days')
-       RETURNING id, name, email, credits, is_premium, trial_expires_at`,
+      `INSERT INTO users (name, email, password, phone, credits, role, is_premium, trial_expires_at)
+       VALUES ($1, $2, $3, $4, 50, 'free', true, NOW() + INTERVAL '14 days')
+       RETURNING id, name, email, credits, role, is_premium, trial_expires_at`,
       [name, email, hashedPassword, phone]
     );
 
     const user = result.rows[0];
 
-    // Registrar créditos iniciales en el historial
     await pool.query(
       `INSERT INTO credit_transactions (user_id, amount, type, description)
        VALUES ($1, 50, 'bonus', 'Créditos de bienvenida')`,
       [user.id]
     );
 
-    // Generar token JWT
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET as string,
       { expiresIn: '30d' }
     );
@@ -54,9 +49,10 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         name: user.name,
         email: user.email,
         credits: user.credits,
+        role: user.role,
         is_premium: user.is_premium,
-        trial_expires_at: user.trial_expires_at
-      }
+        trial_expires_at: user.trial_expires_at,
+      },
     });
 
   } catch (error) {
@@ -70,7 +66,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
 
   try {
-    // Buscar usuario
     const result = await pool.query(
       'SELECT * FROM users WHERE email = $1',
       [email]
@@ -83,7 +78,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const user = result.rows[0];
 
-    // Verificar contraseña
+    if (user.is_active === false) {
+      res.status(403).json({ message: 'Esta cuenta ha sido desactivada' });
+      return;
+    }
+
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       res.status(400).json({ message: 'Correo o contraseña incorrectos' });
@@ -99,9 +98,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       user.is_premium = false;
     }
 
-    // Generar token
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET as string,
       { expiresIn: '30d' }
     );
@@ -114,10 +112,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         name: user.name,
         email: user.email,
         credits: user.credits,
+        role: user.role,
         is_premium: user.is_premium,
         trial_expires_at: user.trial_expires_at,
-        premium_expires_at: user.premium_expires_at
-      }
+        premium_expires_at: user.premium_expires_at,
+      },
     });
 
   } catch (error) {
@@ -130,8 +129,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, phone, credits, is_premium, 
-              trial_expires_at, premium_expires_at, reputation, created_at 
+      `SELECT id, name, email, phone, credits, role, is_premium, is_active,
+              trial_expires_at, premium_expires_at, reputation, created_at
        FROM users WHERE id = $1`,
       [(req as any).userId]
     );

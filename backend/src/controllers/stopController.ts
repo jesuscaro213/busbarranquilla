@@ -67,6 +67,34 @@ export const listStops = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// Eliminar todas las paradas de una ruta (protegido, solo admin)
+export const deleteStopsByRoute = async (req: Request, res: Response): Promise<void> => {
+  const { routeId } = req.params;
+
+  try {
+    const routeExists = await pool.query(
+      'SELECT id FROM routes WHERE id = $1',
+      [routeId]
+    );
+
+    if (routeExists.rows.length === 0) {
+      res.status(404).json({ message: 'Ruta no encontrada' });
+      return;
+    }
+
+    const result = await pool.query(
+      'DELETE FROM stops WHERE route_id = $1',
+      [routeId]
+    );
+
+    res.json({ message: 'Paradas eliminadas', deleted: result.rowCount ?? 0 });
+
+  } catch (error) {
+    console.error('Error eliminando paradas de ruta:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Eliminar parada (protegido)
 export const deleteStop = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;

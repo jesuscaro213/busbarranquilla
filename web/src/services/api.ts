@@ -11,7 +11,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    config.headers.set('Authorization', `Bearer ${token}`);
   }
   return config;
 });
@@ -41,14 +41,38 @@ export const routesApi = {
   search: (origin: string, destination: string) =>
     api.get('/api/routes/search', { params: { origin, destination } }),
 
+  nearby: (lat: number, lng: number, radius = 0.5) =>
+    api.get('/api/routes/nearby', { params: { lat, lng, radius } }),
+
   create: (data: {
     name: string;
     code: string;
     company?: string;
+    company_id?: number;
     first_departure?: string;
     last_departure?: string;
     frequency_minutes?: number;
   }) => api.post('/api/routes', data),
+
+  update: (id: number, data: {
+    name?: string;
+    code?: string;
+    company?: string;
+    company_id?: number;
+    first_departure?: string;
+    last_departure?: string;
+    frequency_minutes?: number;
+  }) => api.put(`/api/routes/${id}`, data),
+
+  delete: (id: number) =>
+    api.delete(`/api/routes/${id}`),
+
+  recommend: (data: {
+    originLat: number;
+    originLng: number;
+    destLat: number;
+    destLng: number;
+  }) => api.post('/api/routes/recommend', data),
 };
 
 // ─── Stops ───────────────────────────────────────────────────────────────────
@@ -67,6 +91,18 @@ export const stopsApi = {
 
   delete: (id: number) =>
     api.delete(`/api/stops/${id}`),
+
+  deleteByRoute: (routeId: number) =>
+    api.delete(`/api/stops/route/${routeId}`),
+};
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+
+export const adminApi = {
+  getCompanies: (isActive?: boolean) =>
+    api.get('/api/admin/companies', {
+      params: isActive !== undefined ? { is_active: isActive } : undefined,
+    }),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
@@ -100,6 +136,25 @@ export const creditsApi = {
 
   spend: (data: { amount: number; feature: string; description: string }) =>
     api.post('/api/credits/spend', data),
+};
+
+// ─── Trips ───────────────────────────────────────────────────────────────────
+
+export const tripsApi = {
+  getActive: () =>
+    api.get('/api/trips/active'),
+
+  getActiveBuses: () =>
+    api.get('/api/trips/buses'),
+
+  start: (data: { route_id: number; latitude: number; longitude: number }) =>
+    api.post('/api/trips/start', data),
+
+  updateLocation: (data: { latitude: number; longitude: number }) =>
+    api.post('/api/trips/location', data),
+
+  end: () =>
+    api.post('/api/trips/end'),
 };
 
 export default api;

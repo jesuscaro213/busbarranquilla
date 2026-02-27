@@ -6,6 +6,7 @@ interface User {
   name: string;
   email: string;
   credits: number;
+  role: 'admin' | 'premium' | 'free';
   is_premium: boolean;
   trial_expires_at: string;
   premium_expires_at: string | null;

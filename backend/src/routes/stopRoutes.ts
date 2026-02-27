@@ -1,12 +1,15 @@
 import { Router } from 'express';
-import { addStop, listStops, deleteStop } from '../controllers/stopController';
+import { addStop, listStops, deleteStop, deleteStopsByRoute } from '../controllers/stopController';
 import { authMiddleware } from '../middlewares/authMiddleware';
+import { requireRole } from '../middlewares/roleMiddleware';
 
 const router = Router();
 
-// /route/:routeId debe ir ANTES de /:id para evitar conflicto de parámetros
+// Las rutas con segmento fijo deben ir ANTES de las de parámetro
 router.get('/route/:routeId', listStops);
-router.post('/', authMiddleware, addStop);
+router.delete('/route/:routeId', authMiddleware, requireRole('admin'), deleteStopsByRoute);
+
+router.post('/', authMiddleware, requireRole('admin'), addStop);
 router.delete('/:id', authMiddleware, deleteStop);
 
 export default router;

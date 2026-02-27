@@ -1,4 +1,5 @@
 import pool from './database';
+import { seedRoutes } from '../scripts/seedRoutes';
 
 const createTables = async () => {
   try {
@@ -20,6 +21,20 @@ const createTables = async () => {
       );
     `);
     console.log('✅ Tabla users creada');
+
+    // Tabla de empresas de transporte
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS companies (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        nit VARCHAR(30),
+        phone VARCHAR(20),
+        email VARCHAR(150),
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    console.log('✅ Tabla companies creada');
 
     // Tabla de rutas de buses
     await pool.query(`
@@ -81,6 +96,47 @@ const createTables = async () => {
       );
     `);
     console.log('✅ Tabla credit_transactions creada');
+
+    // Tabla de viajes activos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS active_trips (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        route_id INTEGER REFERENCES routes(id) ON DELETE SET NULL,
+        current_latitude DECIMAL(10,8),
+        current_longitude DECIMAL(11,8),
+        destination_stop_id INTEGER REFERENCES stops(id) ON DELETE SET NULL,
+        started_at TIMESTAMP DEFAULT NOW(),
+        last_location_at TIMESTAMP,
+        ended_at TIMESTAMP,
+        credits_earned INTEGER DEFAULT 0,
+        is_active BOOLEAN DEFAULT true
+      );
+    `);
+    console.log('✅ Tabla active_trips creada');
+
+    // Seed automático si la tabla de rutas está vacía
+    const { rows } = await pool.query('SELECT COUNT(*) FROM routes');
+    if (parseInt(rows[0].count, 10) === 0) {
+      console.log('📦 Tabla routes vacía — ejecutando seed de Barranquilla...');
+      const summary = await seedRoutes(pool);
+      console.log(`✅ Seed completado: ${summary.routesInserted} rutas, ${summary.stopsInserted} paradas`);
+    }
+
+    // Migraciones seguras para campos nuevos en tabla users
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'free'
+          CHECK (role IN ('admin', 'premium', 'free'))
+    `);
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
+    `);
+    await pool.query(`
+      ALTER TABLE routes
+        ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL
+    `);
 
     console.log('🎉 Base de datos lista');
 

@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import pool from '../config/database';
+import { scanBlog } from '../services/blogScraper';
+import { processImports } from '../services/routeProcessor';
+import { getIo } from '../config/socket';
 
 const VALID_ROLES = ['admin', 'premium', 'free'] as const;
 type Role = typeof VALID_ROLES[number];
@@ -277,6 +280,67 @@ export const toggleCompanyActive = async (req: Request, res: Response): Promise<
 
   } catch (error) {
     console.error('Error alternando estado de la empresa:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// PATCH /api/admin/routes/:id/toggle-active — activar / desactivar ruta
+export const toggleRouteActive = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      'UPDATE routes SET is_active = NOT is_active WHERE id = $1 RETURNING is_active',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ message: 'Ruta no encontrada' });
+      return;
+    }
+
+    res.json({ success: true, is_active: result.rows[0].is_active as boolean });
+  } catch (error) {
+    console.error('Error toggling route active:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// POST /api/admin/routes/scan-blog — lanzar scraper del blog de rutas
+export const scanBlogRoutes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await scanBlog((update) => {
+      getIo().emit('scan:progress', update);
+    });
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error ejecutando scan del blog:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// POST /api/admin/routes/process-imports — geocodificar e importar rutas pendientes
+export const processImportedRoutes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await processImports((update) => {
+      getIo().emit('process:progress', update);
+    });
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error procesando importaciones:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// GET /api/admin/routes/pending-count — cantidad de rutas pendientes de procesar
+export const getPendingCount = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { rows } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM routes WHERE status = 'pending'`
+    );
+    res.json({ pending: parseInt(rows[0].count, 10) });
+  } catch (error) {
+    console.error('Error obteniendo pending count:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };

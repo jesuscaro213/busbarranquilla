@@ -39,16 +39,27 @@ interface Props {
   destinationCenter?: { lat: number; lng: number } | null;
   recommendedRoutes?: RouteRecommendation[];
   selectedRoute?: RouteRecommendation | null;
+  gpsEnabled?: boolean;
+  feedRouteStops?: { latitude: number; longitude: number }[];
+  feedRouteGeometry?: [number, number][] | null;
+  activeTripGeometry?: [number, number][] | null;
+  planOrigin?: { lat: number; lng: number } | null;
+  planDest?: { lat: number; lng: number } | null;
+  planRouteStops?: { latitude: number; longitude: number }[];
+  planDropoffStop?: { latitude: number; longitude: number; name: string } | null;
 }
 
 // Centro de Barranquilla
 const BARRANQUILLA_CENTER: [number, number] = [10.9685, -74.7813];
 
 const USER_ICON = L.divIcon({
-  html: '<div style="background:#2563eb;border:3px solid white;border-radius:50%;width:18px;height:18px;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>',
+  html: `<div style="position:relative;width:24px;height:24px">
+    <div class="animate-ping" style="position:absolute;inset:0;background:#3b82f6;border-radius:50%;opacity:0.35"></div>
+    <div style="position:absolute;inset:4px;background:#2563eb;border:2px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(37,99,235,0.4)"></div>
+  </div>`,
   className: '',
-  iconSize: [18, 18],
-  iconAnchor: [9, 9],
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
 });
 
 const BUS_ICON = L.divIcon({
@@ -204,12 +215,19 @@ function ClickHandler({ onMapClick }: { onMapClick?: (lat: number, lng: number) 
 }
 
 // Componente interno: rastrea GPS del usuario y lo muestra en el mapa
-function UserLocationTracker({ onUserLocation }: { onUserLocation?: (lat: number, lng: number) => void }) {
+function UserLocationTracker({
+  onUserLocation,
+  gpsEnabled,
+}: {
+  onUserLocation?: (lat: number, lng: number) => void;
+  gpsEnabled: boolean;
+}) {
   const map = useMap();
   const markerRef = useRef<L.Marker | null>(null);
   const watchIdRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!gpsEnabled) return;
     if (!navigator.geolocation) return;
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -220,7 +238,7 @@ function UserLocationTracker({ onUserLocation }: { onUserLocation?: (lat: number
         if (!markerRef.current) {
           markerRef.current = L.marker([latitude, longitude], { icon: USER_ICON })
             .addTo(map)
-            .bindPopup('Tú');
+            .bindPopup('Tú estás aquí');
         } else {
           markerRef.current.setLatLng([latitude, longitude]);
         }
@@ -239,7 +257,183 @@ function UserLocationTracker({ onUserLocation }: { onUserLocation?: (lat: number
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [gpsEnabled]);
+
+  return null;
+}
+
+// Íconos para PlanLayer
+const PLAN_ORIGIN_ICON = L.divIcon({
+  html: '<div style="background:#16a34a;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>',
+  className: '',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+const PLAN_DEST_ICON = L.divIcon({
+  html: '<div style="background:#dc2626;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>',
+  className: '',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+const PLAN_DROPOFF_ICON = L.divIcon({
+  html: '<div style="background:#d97706;color:white;font-size:10px;font-weight:700;padding:3px 7px;border-radius:99px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.35)">↓ Bajarse aquí</div>',
+  className: '',
+  iconAnchor: [55, 12],
+});
+
+// Componente interno: capa de visualización del planificador
+function PlanLayer({
+  origin,
+  dest,
+  routeStops,
+  dropoffStop,
+}: {
+  origin: { lat: number; lng: number } | null | undefined;
+  dest: { lat: number; lng: number } | null | undefined;
+  routeStops: { latitude: number; longitude: number }[];
+  dropoffStop: { latitude: number; longitude: number; name: string } | null | undefined;
+}) {
+  const map = useMap();
+  const layersRef = useRef<L.Layer[]>([]);
+
+  useEffect(() => {
+    layersRef.current.forEach((l) => map.removeLayer(l));
+    layersRef.current = [];
+
+    const bounds: [number, number][] = [];
+
+    if (origin) {
+      const m = L.marker([origin.lat, origin.lng], { icon: PLAN_ORIGIN_ICON, zIndexOffset: 600 })
+        .addTo(map)
+        .bindPopup('Tu origen');
+      layersRef.current.push(m);
+      bounds.push([origin.lat, origin.lng]);
+    }
+
+    if (dest) {
+      const m = L.marker([dest.lat, dest.lng], { icon: PLAN_DEST_ICON, zIndexOffset: 600 })
+        .addTo(map)
+        .bindPopup('Tu destino');
+      layersRef.current.push(m);
+      bounds.push([dest.lat, dest.lng]);
+    }
+
+    if (routeStops.length >= 2) {
+      const points: [number, number][] = routeStops.map((s) => [s.latitude, s.longitude]);
+      layersRef.current.push(
+        L.polyline(points, { color: '#2563eb', weight: 5, opacity: 0.8 }).addTo(map)
+      );
+      points.forEach((p) => bounds.push(p));
+    }
+
+    if (dropoffStop) {
+      const m = L.marker([dropoffStop.latitude, dropoffStop.longitude], {
+        icon: PLAN_DROPOFF_ICON,
+        zIndexOffset: 700,
+      })
+        .addTo(map)
+        .bindPopup(`<b>Bajarse aquí</b><br>${dropoffStop.name}`);
+      layersRef.current.push(m);
+      bounds.push([dropoffStop.latitude, dropoffStop.longitude]);
+
+      if (dest) {
+        const dashed = L.polyline(
+          [[dropoffStop.latitude, dropoffStop.longitude], [dest.lat, dest.lng]],
+          { color: '#6b7280', weight: 2, dashArray: '6 4', opacity: 0.7 }
+        ).addTo(map);
+        layersRef.current.push(dashed);
+      }
+    }
+
+    if (bounds.length >= 2) {
+      map.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 15 });
+    }
+
+    return () => {
+      layersRef.current.forEach((l) => map.removeLayer(l));
+      layersRef.current = [];
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, dest, routeStops, dropoffStop]);
+
+  return null;
+}
+
+// Componente interno: dibuja la polyline de una ruta del feed
+function FeedRouteLayer({
+  stops,
+  geometry,
+}: {
+  stops: { latitude: number; longitude: number }[];
+  geometry?: [number, number][] | null;
+}) {
+  const map = useMap();
+  const polylineRef = useRef<L.Polyline | null>(null);
+
+  useEffect(() => {
+    if (polylineRef.current) {
+      map.removeLayer(polylineRef.current);
+      polylineRef.current = null;
+    }
+
+    // Usar geometry guardada si existe; fallback: línea recta entre paradas
+    let points: [number, number][];
+    if (geometry && geometry.length >= 2) {
+      points = geometry;
+    } else if (stops.length >= 2) {
+      points = stops.map((s) => [s.latitude, s.longitude]);
+    } else {
+      return;
+    }
+
+    polylineRef.current = L.polyline(points, {
+      color: '#7c3aed',
+      weight: 5,
+      opacity: 0.85,
+    }).addTo(map);
+
+    map.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 15 });
+
+    return () => {
+      if (polylineRef.current) {
+        map.removeLayer(polylineRef.current);
+        polylineRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stops, geometry]);
+
+  return null;
+}
+
+// Componente interno: dibuja la polyline de la ruta durante un viaje activo
+function ActiveTripLayer({ geometry }: { geometry?: [number, number][] | null }) {
+  const map = useMap();
+  const polylineRef = useRef<L.Polyline | null>(null);
+
+  useEffect(() => {
+    if (polylineRef.current) {
+      map.removeLayer(polylineRef.current);
+      polylineRef.current = null;
+    }
+    if (!geometry || geometry.length < 2) return;
+
+    polylineRef.current = L.polyline(geometry, {
+      color: '#16a34a',
+      weight: 5,
+      opacity: 0.8,
+    }).addTo(map);
+
+    return () => {
+      if (polylineRef.current) {
+        map.removeLayer(polylineRef.current);
+        polylineRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometry]);
 
   return null;
 }
@@ -308,6 +502,14 @@ export default function MapView({
   destinationCenter,
   recommendedRoutes = [],
   selectedRoute,
+  gpsEnabled = false,
+  feedRouteStops = [],
+  feedRouteGeometry,
+  activeTripGeometry,
+  planOrigin,
+  planDest,
+  planRouteStops = [],
+  planDropoffStop,
 }: Props) {
   const [reports, setReports] = useState<Report[]>([]);
 
@@ -330,9 +532,17 @@ export default function MapView({
       />
 
       <ClickHandler onMapClick={onMapClick} />
-      <UserLocationTracker onUserLocation={onUserLocation} />
+      <UserLocationTracker onUserLocation={onUserLocation} gpsEnabled={gpsEnabled} />
       <BusTracker />
       <MapFlyTo center={destinationCenter} />
+      <FeedRouteLayer stops={feedRouteStops} geometry={feedRouteGeometry} />
+      <ActiveTripLayer geometry={activeTripGeometry} />
+      <PlanLayer
+        origin={planOrigin}
+        dest={planDest}
+        routeStops={planRouteStops}
+        dropoffStop={planDropoffStop}
+      />
       <RecommendationLayer
         recommendations={recommendedRoutes}
         selectedRoute={selectedRoute}

@@ -52,6 +52,7 @@ export const routesApi = {
     first_departure?: string;
     last_departure?: string;
     frequency_minutes?: number;
+    geometry?: [number, number][] | null;
   }) => api.post('/api/routes', data),
 
   update: (id: number, data: {
@@ -62,10 +63,14 @@ export const routesApi = {
     first_departure?: string;
     last_departure?: string;
     frequency_minutes?: number;
+    geometry?: [number, number][] | null;
   }) => api.put(`/api/routes/${id}`, data),
 
   delete: (id: number) =>
     api.delete(`/api/routes/${id}`),
+
+  regenerateGeometry: (id: number) =>
+    api.post(`/api/routes/${id}/regenerate-geometry`),
 
   recommend: (data: {
     originLat: number;
@@ -73,6 +78,24 @@ export const routesApi = {
     destLat: number;
     destLng: number;
   }) => api.post('/api/routes/recommend', data),
+
+  activeFeed: () =>
+    api.get('/api/routes/active-feed'),
+
+  plan: (destLat: number, destLng: number) =>
+    api.get('/api/routes/plan', { params: { destLat, destLng } }),
+
+  toggleActive: (id: number) =>
+    api.patch(`/api/routes/${id}/toggle`),
+
+  scanBlog: () =>
+    api.post('/api/admin/routes/scan-blog'),
+
+  processImports: () =>
+    api.post('/api/admin/routes/process-imports'),
+
+  getPendingCount: () =>
+    api.get('/api/admin/routes/pending-count'),
 };
 
 // ─── Stops ───────────────────────────────────────────────────────────────────
@@ -107,7 +130,9 @@ export const adminApi = {
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
 
-export type ReportType = 'bus_location' | 'traffic' | 'bus_full' | 'no_service' | 'detour';
+export type ReportType =
+  | 'bus_location' | 'traffic' | 'bus_full' | 'no_service' | 'detour'
+  | 'desvio' | 'trancon' | 'casi_lleno' | 'lleno' | 'sin_parar' | 'espera';
 
 export const reportsApi = {
   getNearby: (lat: number, lng: number, radius = 1) =>
@@ -123,6 +148,9 @@ export const reportsApi = {
 
   confirm: (id: number) =>
     api.put(`/api/reports/${id}/confirm`),
+
+  resolve: (id: number) =>
+    api.patch(`/api/reports/${id}/resolve`),
 };
 
 // ─── Credits ─────────────────────────────────────────────────────────────────
@@ -144,6 +172,9 @@ export const tripsApi = {
   getActive: () =>
     api.get('/api/trips/active'),
 
+  getCurrent: () =>
+    api.get('/api/trips/current'),
+
   getActiveBuses: () =>
     api.get('/api/trips/buses'),
 
@@ -155,6 +186,19 @@ export const tripsApi = {
 
   end: () =>
     api.post('/api/trips/end'),
+};
+
+// ─── Users / Favorites ───────────────────────────────────────────────────────
+
+export const usersApi = {
+  getFavorites: () =>
+    api.get('/api/users/favorites'),
+
+  addFavorite: (routeId: number) =>
+    api.post('/api/users/favorites', { route_id: routeId }),
+
+  removeFavorite: (routeId: number) =>
+    api.delete(`/api/users/favorites/${routeId}`),
 };
 
 export default api;

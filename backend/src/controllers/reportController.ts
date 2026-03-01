@@ -2,14 +2,23 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import { awardCredits } from './creditController';
 
-const VALID_TYPES = ['bus_location', 'traffic', 'bus_full', 'no_service', 'detour'] as const;
+const VALID_TYPES = [
+  'bus_location', 'traffic', 'bus_full', 'no_service', 'detour',
+  'desvio', 'trancon', 'casi_lleno', 'lleno', 'sin_parar', 'espera',
+] as const;
 
 const CREDITS_BY_TYPE: Record<string, number> = {
   bus_location: 5,
   traffic: 4,
   bus_full: 3,
   no_service: 4,
-  detour: 4
+  detour: 4,
+  desvio: 4,
+  trancon: 4,
+  casi_lleno: 3,
+  lleno: 3,
+  sin_parar: 4,
+  espera: 3,
 };
 
 // Crear reporte (protegido)
@@ -84,6 +93,33 @@ export const listNearbyReports = async (req: Request, res: Response): Promise<vo
 
   } catch (error) {
     console.error('Error listando reportes cercanos:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Resolver reporte propio (protegido)
+export const resolveReport = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const userId = (req as any).userId as number;
+
+  try {
+    const result = await pool.query(
+      `UPDATE reports
+       SET is_active = false, resolved_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING id`,
+      [id, userId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ message: 'Reporte no encontrado o no tienes permiso para resolverlo' });
+      return;
+    }
+
+    res.json({ message: 'Reporte resuelto correctamente' });
+
+  } catch (error) {
+    console.error('Error resolviendo reporte:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };

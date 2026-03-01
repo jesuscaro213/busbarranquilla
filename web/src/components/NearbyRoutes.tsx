@@ -30,7 +30,7 @@ export default function NearbyRoutes({ userPosition, onSelectRoute }: Props) {
   }, [userPosition]);
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl overflow-hidden w-full max-w-xs">
+    <div className="bg-white rounded-2xl shadow-xl overflow-hidden w-full">
       <button
         onClick={() => setCollapsed((c) => !c)}
         className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors"

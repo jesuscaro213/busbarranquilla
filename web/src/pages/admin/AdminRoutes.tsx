@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { routesApi, stopsApi, adminApi } from '../../services/api';
+import { getSocket } from '../../services/socket';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ interface Route {
   last_departure: string | null;
   frequency_minutes: number | null;
   is_active: boolean;
+  status: string | null;
 }
 
 interface Company {
@@ -195,6 +197,21 @@ export default function AdminRoutes() {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
   const [routesError, setRoutesError] = useState<string | null>(null);
+  const [regenToast, setRegenToast] = useState<string | null>(null);
+  const [regenLoadingId, setRegenLoadingId] = useState<number | null>(null);
+  const [toggleLoadingId, setToggleLoadingId] = useState<number | null>(null);
+  const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<{
+    total: number;
+    current: number;
+    currentRoute: string;
+    status: 'scanning' | 'done' | 'processing';
+  } | null>(null);
+  const [progressLabel, setProgressLabel] = useState('');
+  const [pendingCount, setPendingCount] = useState(0);
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modalOpen, setModalOpen] = useState(false);
@@ -204,12 +221,18 @@ export default function AdminRoutes() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
 
-  // ── Step 2 — stops (geocoder untouched) ────────────────────────────────────
+  // ── Step 2 — stops ──────────────────────────────────────────────────────────
   const [stops, setStops] = useState<Stop[]>([]);
   const [geocodeText, setGeocodeText] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0 });
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  // ── Step 2 — geometry ───────────────────────────────────────────────────────
+  const [customGeometry, setCustomGeometry] = useState<[number, number][] | null>(null);
+  const [isEditingGeometry, setIsEditingGeometry] = useState(false);
+  const [osrmGeometry, setOsrmGeometry] = useState<[number, number][] | null>(null);
+  const [geomBeforeEdit, setGeomBeforeEdit] = useState<[number, number][] | null>(null);
 
   // ── Step 2 — map ────────────────────────────────────────────────────────────
   const [mapReady, setMapReady] = useState(false);
@@ -225,13 +248,40 @@ export default function AdminRoutes() {
   const markersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
   const locatingStopRef = useRef<string | null>(null);
+  const geomMarkersRef = useRef<L.Marker[]>([]);
+  const geomPolylineRef = useRef<L.Polyline | null>(null);
+  const isEditingGeometryRef = useRef(false);
 
-  // Keep locatingStopRef current so the map click handler always has the latest value
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpenDropdownId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Sync refs with state
   useEffect(() => {
     locatingStopRef.current = locatingStop;
   }, [locatingStop]);
 
+  useEffect(() => {
+    isEditingGeometryRef.current = isEditingGeometry;
+  }, [isEditingGeometry]);
+
   // ── Load routes ────────────────────────────────────────────────────────────
+
+  const loadPendingCount = useCallback(async () => {
+    try {
+      const res = await routesApi.getPendingCount();
+      setPendingCount((res.data as { pending: number }).pending);
+    } catch {
+      // silencioso
+    }
+  }, []);
 
   const loadRoutes = useCallback(async () => {
     setLoadingRoutes(true);
@@ -248,7 +298,8 @@ export default function AdminRoutes() {
 
   useEffect(() => {
     loadRoutes();
-  }, [loadRoutes]);
+    loadPendingCount();
+  }, [loadRoutes, loadPendingCount]);
 
   // ── Load companies when modal opens ────────────────────────────────────────
 
@@ -271,10 +322,14 @@ export default function AdminRoutes() {
     setStops([]);
     setGeocodeText('');
     setSaveError(null);
+    setCustomGeometry(null);
+    setOsrmGeometry(null);
+    setIsEditingGeometry(false);
+    setGeomBeforeEdit(null);
     setModalOpen(true);
   }
 
-  function openEditModal(route: Route) {
+  async function openEditModal(route: Route) {
     setEditingRoute(route);
     setForm({
       name: route.name,
@@ -288,6 +343,21 @@ export default function AdminRoutes() {
     setStops([]);
     setGeocodeText('');
     setSaveError(null);
+    setIsEditingGeometry(false);
+    setGeomBeforeEdit(null);
+
+    // Load existing geometry from backend
+    try {
+      const res = await routesApi.getById(route.id);
+      const fullRoute = res.data.route as { geometry?: [number, number][] | null };
+      const geom = fullRoute.geometry && fullRoute.geometry.length >= 2 ? fullRoute.geometry : null;
+      setOsrmGeometry(geom);
+      setCustomGeometry(geom);
+    } catch {
+      setOsrmGeometry(null);
+      setCustomGeometry(null);
+    }
+
     setModalOpen(true);
   }
 
@@ -300,6 +370,10 @@ export default function AdminRoutes() {
     setGeocodeText('');
     setSaveError(null);
     setLocatingStop(null);
+    setCustomGeometry(null);
+    setOsrmGeometry(null);
+    setIsEditingGeometry(false);
+    setGeomBeforeEdit(null);
   }
 
   const canNext = form.name.trim() !== '' && form.code.trim() !== '';
@@ -311,8 +385,8 @@ export default function AdminRoutes() {
         const loaded = (res.data.stops as BackendStop[]).map(s => ({
           id: crypto.randomUUID(),
           name: s.name,
-          lat: s.latitude,
-          lng: s.longitude,
+          lat: parseFloat(String(s.latitude)),
+          lng: parseFloat(String(s.longitude)),
         }));
         setStops(loaded);
       } catch {
@@ -417,6 +491,7 @@ export default function AdminRoutes() {
       }).addTo(map);
 
       map.on('click', (e: L.LeafletMouseEvent) => {
+        // Locate mode takes priority
         if (locatingStopRef.current !== null) {
           setStops(prev =>
             prev.map(s =>
@@ -426,7 +501,14 @@ export default function AdminRoutes() {
             )
           );
           setLocatingStop(null);
+        } else if (isEditingGeometryRef.current) {
+          // Geometry edit mode — add point
+          setCustomGeometry(prev => [
+            ...(prev ?? []),
+            [e.latlng.lat, e.latlng.lng] as [number, number],
+          ]);
         } else {
+          // Default — add stop
           setStops(prev => [
             ...prev,
             {
@@ -452,6 +534,12 @@ export default function AdminRoutes() {
         polylineRef.current.remove();
         polylineRef.current = null;
       }
+      geomMarkersRef.current.forEach(m => m.remove());
+      geomMarkersRef.current = [];
+      if (geomPolylineRef.current) {
+        geomPolylineRef.current.remove();
+        geomPolylineRef.current = null;
+      }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -459,13 +547,17 @@ export default function AdminRoutes() {
     };
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Map cursor for locate mode ─────────────────────────────────────────────
+  // ── Map cursor ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.getContainer().style.cursor = locatingStop ? 'crosshair' : '';
-  }, [locatingStop]);
+    map.getContainer().style.cursor = locatingStop
+      ? 'crosshair'
+      : isEditingGeometry
+      ? 'cell'
+      : '';
+  }, [locatingStop, isEditingGeometry]);
 
   // ── ESC cancels locate mode ────────────────────────────────────────────────
 
@@ -484,13 +576,16 @@ export default function AdminRoutes() {
     const map = mapRef.current;
     if (!map) return;
 
-    // Clear previous markers and polyline
+    // Clear previous stop markers and polyline
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
     if (polylineRef.current) {
       polylineRef.current.remove();
       polylineRef.current = null;
     }
+
+    // Hide stop markers in geometry edit mode
+    if (isEditingGeometry) return;
 
     type ValidStop = Stop & { order: number; lat: number; lng: number };
     const validStops = stops
@@ -548,7 +643,70 @@ export default function AdminRoutes() {
         opacity: 0.8,
       }).addTo(map);
     }
-  }, [stops, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stops, mapReady, isEditingGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Render geometry on map ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    // Clear previous geometry markers and polyline
+    geomMarkersRef.current.forEach(m => m.remove());
+    geomMarkersRef.current = [];
+    if (geomPolylineRef.current) {
+      geomPolylineRef.current.remove();
+      geomPolylineRef.current = null;
+    }
+
+    if (isEditingGeometry && customGeometry && customGeometry.length >= 1) {
+      // Draggable gray point markers — click to delete (min 2 remaining)
+      customGeometry.forEach(([lat, lng], idx) => {
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="background:#6B7280;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.5);cursor:pointer;"></div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        });
+
+        const marker = L.marker([lat, lng], { icon, draggable: true });
+
+        marker.on('dragend', () => {
+          const { lat: newLat, lng: newLng } = marker.getLatLng();
+          setCustomGeometry(prev => {
+            if (!prev) return prev;
+            const next = [...prev] as [number, number][];
+            next[idx] = [newLat, newLng];
+            return next;
+          });
+        });
+
+        marker.on('click', () => {
+          setCustomGeometry(prev => {
+            if (!prev || prev.length <= 2) return prev;
+            return prev.filter((_, i) => i !== idx);
+          });
+        });
+
+        marker.addTo(map);
+        geomMarkersRef.current.push(marker);
+      });
+
+      // Blue polyline while editing
+      if (customGeometry.length >= 2) {
+        geomPolylineRef.current = L.polyline(
+          customGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+          { color: '#3B82F6', weight: 3, opacity: 0.9 }
+        ).addTo(map);
+      }
+    } else if (!isEditingGeometry && customGeometry && customGeometry.length >= 2) {
+      // Green polyline when saved / not editing
+      geomPolylineRef.current = L.polyline(
+        customGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color: '#10B981', weight: 4, opacity: 0.8 }
+      ).addTo(map);
+    }
+  }, [isEditingGeometry, customGeometry, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Save route (create or edit) ────────────────────────────────────────────
 
@@ -560,7 +718,15 @@ export default function AdminRoutes() {
     const validStops = stops.filter((s): s is ValidStop => s.lat !== null && s.lng !== null);
 
     try {
-      const payload = {
+      const payload: {
+        name: string;
+        code: string;
+        company_id?: number;
+        first_departure?: string;
+        last_departure?: string;
+        frequency_minutes?: number;
+        geometry?: [number, number][] | null;
+      } = {
         name: form.name,
         code: form.code,
         company_id: form.company_id ? parseInt(form.company_id) : undefined,
@@ -568,6 +734,10 @@ export default function AdminRoutes() {
         last_departure: form.last_departure || undefined,
         frequency_minutes: form.frequency_minutes ? parseInt(form.frequency_minutes) : undefined,
       };
+
+      if (customGeometry !== null) {
+        payload.geometry = customGeometry;
+      }
 
       let routeId: number;
 
@@ -613,21 +783,198 @@ export default function AdminRoutes() {
     }
   }
 
+  // ── Toggle route active state ──────────────────────────────────────────────
+
+  async function handleToggleActive(routeId: number) {
+    setToggleLoadingId(routeId);
+    try {
+      await routesApi.toggleActive(routeId);
+      await loadRoutes();
+    } catch {
+      window.alert('Error al cambiar el estado de la ruta.');
+    } finally {
+      setToggleLoadingId(null);
+    }
+  }
+
+  // ── Scan blog ──────────────────────────────────────────────────────────────
+
+  async function handleScanBlog() {
+    setScanLoading(true);
+    setScanResult(null);
+    setScanProgress(null);
+    setProgressLabel('Escaneando blog');
+
+    const socket = getSocket();
+    socket.on('scan:progress', (data: {
+      total: number;
+      current: number;
+      currentRoute: string;
+      status: 'scanning' | 'done';
+      result?: { new: number; updated: number; unchanged: number; errors: number };
+    }) => {
+      if (data.status === 'done') {
+        setScanProgress(null);
+        const r = data.result!;
+        setScanResult(
+          `✅ Escaneo: ${r.new} nuevas, ${r.updated} actualizadas, ` +
+          `${r.unchanged} sin cambios, ${r.errors} error${r.errors !== 1 ? 'es' : ''}`
+        );
+      } else {
+        setScanProgress({ total: data.total, current: data.current, currentRoute: data.currentRoute, status: data.status });
+      }
+    });
+
+    try {
+      await routesApi.scanBlog();
+      await loadRoutes();
+      await loadPendingCount();
+    } catch {
+      setScanResult('❌ Error en el escaneo');
+      setScanProgress(null);
+    } finally {
+      socket.off('scan:progress');
+      setScanLoading(false);
+    }
+  }
+
+  // ── Process imports ────────────────────────────────────────────────────────
+
+  async function handleProcessImports() {
+    setScanLoading(true);
+    setScanResult(null);
+    setScanProgress(null);
+    setProgressLabel('Procesando rutas');
+
+    const socket = getSocket();
+    socket.on('process:progress', (data: {
+      total: number;
+      current: number;
+      currentRoute: string;
+      status: 'processing' | 'done';
+      result?: { processed: number; errors: number };
+      completedRoute?: { id: number; name: string; status: string; is_active: boolean };
+    }) => {
+      if (data.status === 'done') {
+        setScanProgress(null);
+        const r = data.result!;
+        setScanResult(
+          `✅ Procesamiento: ${r.processed} listas, ${r.errors} error${r.errors !== 1 ? 'es' : ''}`
+        );
+      } else {
+        setScanProgress({ total: data.total, current: data.current, currentRoute: data.currentRoute, status: data.status });
+        if (data.completedRoute) {
+          const cr = data.completedRoute;
+          setRoutes(prev => {
+            const exists = prev.find(r => r.id === cr.id);
+            if (exists) return prev.map(r => r.id === cr.id ? { ...r, ...cr } : r);
+            return [...prev, cr as Route];
+          });
+        }
+      }
+    });
+
+    try {
+      await routesApi.processImports();
+      await loadRoutes();
+      await loadPendingCount();
+    } catch {
+      setScanResult('❌ Error en el procesamiento');
+      setScanProgress(null);
+    } finally {
+      socket.off('process:progress');
+      setScanLoading(false);
+    }
+  }
+
+  // ── Regenerate geometry ────────────────────────────────────────────────────
+
+  async function handleRegenGeometry(routeId: number) {
+    setRegenLoadingId(routeId);
+    try {
+      const res = await routesApi.regenerateGeometry(routeId);
+      const { pointsCount, hadFallbacks } = res.data as { pointsCount: number; hadFallbacks: boolean };
+      setRegenToast(
+        hadFallbacks
+          ? `Trazado regenerado (${pointsCount} pts, con tramos rectos)`
+          : `Trazado regenerado (${pointsCount} pts)`
+      );
+    } catch {
+      setRegenToast('Error al regenerar el trazado');
+    } finally {
+      setRegenLoadingId(null);
+      setTimeout(() => setRegenToast(null), 4000);
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-6">
+      {/* Regenerate toast */}
+      {regenToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg">
+          {regenToast}
+        </div>
+      )}
+
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-bold text-gray-900">Rutas</h1>
-        <button
-          onClick={openModal}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
-        >
-          <span className="text-base font-bold">+</span>
-          Nueva Ruta
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleScanBlog}
+            disabled={scanLoading}
+            className="flex items-center gap-2 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+          >
+            🔍 Escanear blog
+          </button>
+          {pendingCount > 0 && (
+            <button
+              onClick={handleProcessImports}
+              disabled={scanLoading}
+              className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+            >
+              ⚙️ Procesar rutas ({pendingCount} pendientes)
+            </button>
+          )}
+          <button
+            onClick={openModal}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+          >
+            <span className="text-base font-bold">+</span>
+            Nueva Ruta
+          </button>
+        </div>
       </div>
+
+      {/* Progress bar */}
+      {scanProgress && (
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span className="font-medium">{progressLabel} ({scanProgress.current}/{scanProgress.total})</span>
+            <span>{scanProgress.total > 0 ? Math.round((scanProgress.current / scanProgress.total) * 100) : 0}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mb-1.5">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${scanProgress.total > 0 ? (scanProgress.current / scanProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-500 truncate">{scanProgress.currentRoute}</p>
+        </div>
+      )}
+
+      {/* Scan result message */}
+      {scanResult && (
+        <div className={`mb-4 px-4 py-2 rounded-lg text-sm font-medium ${
+          scanResult.startsWith('✅')
+            ? 'bg-green-50 text-green-800 border border-green-200'
+            : 'bg-red-50 text-red-800 border border-red-200'
+        }`}>
+          {scanResult}
+        </div>
+      )}
 
       {/* Routes table */}
       {loadingRoutes ? (
@@ -649,6 +996,7 @@ export default function AdminRoutes() {
                 <th className="px-4 py-3 text-left">Frecuencia</th>
                 <th className="px-4 py-3 text-left">Horario</th>
                 <th className="px-4 py-3 text-left">Estado</th>
+                <th className="px-4 py-3 text-left">Proceso</th>
                 <th className="px-4 py-3 text-left">Acciones</th>
               </tr>
             </thead>
@@ -684,19 +1032,59 @@ export default function AdminRoutes() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    {route.status === 'pending' && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Pendiente</span>
+                    )}
+                    {route.status === 'processing' && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Procesando</span>
+                    )}
+                    {route.status === 'done' && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Lista</span>
+                    )}
+                    {route.status === 'error' && (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">Error</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="relative" ref={openDropdownId === route.id ? dropdownRef : null}>
                       <button
-                        onClick={() => openEditModal(route)}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                        onClick={() => setOpenDropdownId(openDropdownId === route.id ? null : route.id)}
+                        className="text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-2 py-1 rounded text-base font-bold transition-colors"
+                        title="Acciones"
                       >
-                        Editar
+                        ⋮
                       </button>
-                      <button
-                        onClick={() => handleDeleteRoute(route.id)}
-                        className="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50 transition-colors"
-                      >
-                        Eliminar
-                      </button>
+                      {openDropdownId === route.id && (
+                        <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                          <button
+                            onClick={() => { openEditModal(route); setOpenDropdownId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg transition-colors"
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            onClick={() => { handleToggleActive(route.id); setOpenDropdownId(null); }}
+                            disabled={toggleLoadingId === route.id}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {route.is_active ? '🔴 Desactivar' : '🟢 Activar'}
+                          </button>
+                          <button
+                            onClick={() => { handleRegenGeometry(route.id); setOpenDropdownId(null); }}
+                            disabled={regenLoadingId === route.id}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {regenLoadingId === route.id ? '⏳ Regenerando…' : '🔄 Regenerar geometría'}
+                          </button>
+                          <hr className="border-gray-100" />
+                          <button
+                            onClick={() => { handleDeleteRoute(route.id); setOpenDropdownId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-b-lg transition-colors"
+                          >
+                            🗑️ Eliminar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -710,7 +1098,6 @@ export default function AdminRoutes() {
       {modalOpen && (
         <div
           className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
-          onClick={closeModal}
         >
           <div
             className="w-[95vw] h-[95vh] bg-white rounded-xl flex flex-col overflow-hidden shadow-2xl"
@@ -813,8 +1200,9 @@ export default function AdminRoutes() {
                                     ⚠️ Sin ubicar
                                   </span>
                                   <button
-                                    onClick={() => setLocatingStop(stop.id)}
-                                    className="text-xs text-blue-400 hover:text-blue-300 underline whitespace-nowrap"
+                                    onClick={() => !isEditingGeometry && setLocatingStop(stop.id)}
+                                    disabled={isEditingGeometry}
+                                    className="text-xs text-blue-400 hover:text-blue-300 underline whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
                                   >
                                     Ubicar
                                   </button>
@@ -834,6 +1222,59 @@ export default function AdminRoutes() {
                             </li>
                           ))}
                         </ul>
+                      )}
+                    </div>
+
+                    {/* ── Geometry section ──────────────────────────────── */}
+                    <div className="p-4 border-t border-gray-700 shrink-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                          Trazado
+                        </span>
+                        {customGeometry !== null && !isEditingGeometry && (
+                          <span className="text-xs bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-full">
+                            ✏️ Personalizado
+                          </span>
+                        )}
+                      </div>
+
+                      {isEditingGeometry ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-gray-500 mb-2">
+                            {customGeometry?.length ?? 0} puntos · click en mapa para añadir · click en punto para eliminar
+                          </p>
+                          <button
+                            onClick={() => setIsEditingGeometry(false)}
+                            className="w-full text-xs bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-3 py-2 rounded-lg transition-colors"
+                          >
+                            ✅ Guardar trazado
+                          </button>
+                          <button
+                            onClick={() => setCustomGeometry(osrmGeometry)}
+                            className="w-full text-xs bg-gray-600 hover:bg-gray-500 text-gray-200 font-medium px-3 py-2 rounded-lg transition-colors"
+                          >
+                            🔄 Resetear a OSRM
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCustomGeometry(geomBeforeEdit);
+                              setIsEditingGeometry(false);
+                            }}
+                            className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-400 font-medium px-3 py-2 rounded-lg transition-colors"
+                          >
+                            ❌ Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setGeomBeforeEdit(customGeometry);
+                            setIsEditingGeometry(true);
+                          }}
+                          className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium px-3 py-2 rounded-lg transition-colors"
+                        >
+                          ✏️ Editar trazado
+                        </button>
                       )}
                     </div>
 
@@ -865,8 +1306,24 @@ export default function AdminRoutes() {
 
                   {/* ── Right panel — Leaflet map ────────────────────────── */}
                   <div className="flex-1 relative">
+                    {/* Geometry edit mode banner */}
+                    {isEditingGeometry && (
+                      <div className="absolute top-0 left-0 right-0 bg-blue-600 text-white text-sm font-medium px-4 py-2 flex items-center justify-between" style={{ zIndex: 1000 }}>
+                        <span>✏️ Modo edición de trazado — click en el mapa para añadir puntos</span>
+                        <button
+                          onClick={() => {
+                            setCustomGeometry(geomBeforeEdit);
+                            setIsEditingGeometry(false);
+                          }}
+                          className="ml-4 text-blue-200 hover:text-white font-bold text-base leading-none"
+                        >
+                          ✕ ESC
+                        </button>
+                      </div>
+                    )}
+
                     {/* Locate mode banner */}
-                    {locatingStop && (
+                    {locatingStop && !isEditingGeometry && (
                       <div className="absolute top-0 left-0 right-0 bg-yellow-400 text-yellow-900 text-sm font-medium px-4 py-2 flex items-center justify-between" style={{ zIndex: 1000 }}>
                         <span>
                           📍 Haz click en el mapa para ubicar:{' '}
@@ -880,6 +1337,7 @@ export default function AdminRoutes() {
                         </button>
                       </div>
                     )}
+
                     <div ref={mapContainerRef} className="h-full w-full" />
                   </div>
 

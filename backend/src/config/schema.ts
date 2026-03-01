@@ -138,6 +138,71 @@ const createTables = async () => {
         ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL
     `);
 
+    // Migraciones para reports
+    await pool.query(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_lat DECIMAL(10,8)`);
+    await pool.query(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_lng DECIMAL(11,8)`);
+    await pool.query(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ DEFAULT NULL`);
+
+    // Descripción textual del recorrido (para detectar cambios en scraper)
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS description TEXT`);
+
+    // Estado de la ruta: 'active' (verificada) | 'pending' (importada del blog)
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`);
+    console.log('✅ Columna status en routes');
+
+    // Geometría de ruta (polyline de OSRM)
+    await pool.query(`
+      ALTER TABLE routes ADD COLUMN IF NOT EXISTS geometry JSONB DEFAULT NULL
+    `);
+
+    // Tabla de rutas favoritas por usuario
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_favorite_routes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        route_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, route_id)
+      )
+    `);
+    console.log('✅ Tabla user_favorite_routes creada');
+
+    // Tabla de trazados de ruta aportados por usuarios
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS route_traces (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        points JSONB NOT NULL,
+        started_at TIMESTAMP NOT NULL,
+        ended_at TIMESTAMP NOT NULL,
+        point_count INTEGER NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_route_traces_route_id ON route_traces(route_id)
+    `);
+    console.log('✅ Tabla route_traces creada');
+
+    // Columnas para geometría sugerida por usuarios en routes
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS suggested_geometry JSONB`);
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS has_suggestion BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS suggestion_trace_count INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS suggestion_updated_at TIMESTAMP`);
+    console.log('✅ Columnas de sugerencia de trazado en routes');
+
+    // Ampliar code a VARCHAR(100) para soportar slugs largos del blog
+    await pool.query(`ALTER TABLE routes ALTER COLUMN code TYPE VARCHAR(100)`);
+    console.log('✅ Columna code ampliada a VARCHAR(100)');
+
+    // Índice único en companies.name para soportar upsert del scraper
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS companies_name_unique ON companies(name)
+    `);
+    console.log('✅ Índice único en companies(name)');
+
     console.log('🎉 Base de datos lista');
 
   } catch (error) {

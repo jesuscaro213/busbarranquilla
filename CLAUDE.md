@@ -74,11 +74,12 @@ npm run web
 
 **Route groups** (all prefixed `/api/`):
 - `auth` → register, login, profile
-- `routes` → bus route CRUD + search by origin/destination + nearby + recommend
+- `routes` → bus route CRUD + search + nearby + active feed + trip planner + geometry
 - `stops` → stops per route (CRUD)
-- `reports` → create report, list nearby (geolocation), confirm
+- `reports` → create report, list nearby (geolocation), confirm, resolve
 - `credits` → balance, history, spend
-- `trips` → start trip, update location, end trip
+- `trips` → start trip, update location, end trip, current trip
+- `users` → favorites (add, remove, list)
 - `admin` → users CRUD + companies CRUD (requires `role = 'admin'`)
 
 **Middleware chain for protected routes:**
@@ -90,13 +91,15 @@ npm run web
 
 **Credit flow** — creating or confirming a report triggers `credit_transactions` via `awardCredits()` in `creditController.ts`. Premium users skip credit checks.
 
-**Reports** expire in 30 minutes (`expires_at`). `/api/reports/nearby` filters by radius using Haversine formula.
+**Reports** expire in 30 minutes (`expires_at`). `/api/reports/nearby` filters by radius using Haversine formula. Reports can be self-resolved via `PATCH /api/reports/:id/resolve` (sets `is_active = false`, `resolved_at = NOW()`).
+
+**Route geometry** — stored as JSONB in `routes.geometry`. On create/update, the backend calls OSRM (two-attempt strategy: full route first, then segment-by-segment with straight-line fallback). Geometry can be regenerated on demand via `POST /api/routes/:id/regenerate-geometry`. The `pg` library auto-parses JSONB to `[number, number][]` — no manual JSON.parse needed in frontend.
 
 **Socket.io** — configured in `config/socket.ts`. Real-time bus location tracking via `bus:location`, `bus:joined`, `bus:left`, `route:nearby` channels.
 
 **Seed** — `scripts/seedRoutes.ts` auto-runs on startup if `routes` table is empty. Seeds real Barranquilla bus routes with stops.
 
-**Note**: In all route files, named routes (`/nearby`, `/search`, `/balance`) must stay above param routes (`/:id`) to avoid Express conflicts.
+**Note**: In all route files, named routes (`/nearby`, `/search`, `/balance`, `/active-feed`, `/plan`, `/current`) must stay above param routes (`/:id`) to avoid Express conflicts.
 
 #### Backend file map
 
@@ -112,10 +115,11 @@ backend/src/
 │   ├── authController.ts    # register, login, profile
 │   ├── creditController.ts  # balance, history, spend, awardCredits()
 │   ├── recommendController.ts # Route recommendations
-│   ├── reportController.ts  # create, nearby, confirm
-│   ├── routeController.ts   # CRUD + search + nearby
+│   ├── reportController.ts  # create, nearby, confirm, resolveReport
+│   ├── routeController.ts   # CRUD + search + nearby + activeFeed + getPlanRoutes + regenerateGeometry
 │   ├── stopController.ts    # CRUD per route
-│   └── tripController.ts    # start, updateLocation, end, active buses
+│   ├── tripController.ts    # start, updateLocation, end, active buses, getTripCurrent
+│   └── userController.ts    # listFavorites, addFavorite, removeFavorite
 ├── middlewares/
 │   ├── authMiddleware.ts    # JWT verify → req.userId, req.userRole
 │   ├── creditMiddleware.ts  # Credit check for premium features
@@ -127,10 +131,24 @@ backend/src/
 │   ├── reportRoutes.ts
 │   ├── routeRoutes.ts
 │   ├── stopRoutes.ts
-│   └── tripRoutes.ts
+│   ├── tripRoutes.ts
+│   └── userRoutes.ts        # /api/users/favorites
 └── scripts/
     └── seedRoutes.ts        # Barranquilla routes + stops seed data
 ```
+
+#### New API endpoints (added in Phase 2)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/routes/active-feed` | ✅ | Up to 8 routes with reports in last 60 min |
+| GET | `/api/routes/plan?destLat=X&destLng=Y` | ✅ | Routes with stops ≤1 km from destination |
+| POST | `/api/routes/:id/regenerate-geometry` | admin | Re-fetch OSRM geometry for a route |
+| GET | `/api/trips/current` | ✅ | Active trip for current user (`{ trip: null }` if none) |
+| PATCH | `/api/reports/:id/resolve` | ✅ | Self-resolve own report |
+| GET | `/api/users/favorites` | ✅ | List favorite routes |
+| POST | `/api/users/favorites` | ✅ | Add route to favorites `{ route_id }` |
+| DELETE | `/api/users/favorites/:routeId` | ✅ | Remove route from favorites |
 
 ---
 
@@ -159,24 +177,50 @@ web/src/
 │   └── socket.ts                  # Socket.io client
 ├── components/
 │   ├── AdminRoute.tsx             # Layout route guard (role check → Outlet)
+│   ├── CatchBusMode.tsx           # "Me subí/bajé" flow + 4 background monitors
 │   ├── CreditBalance.tsx
-│   ├── MapView.tsx
+│   ├── MapView.tsx                # Leaflet map: stops, feed routes, active trip geometry
 │   ├── Navbar.tsx                 # Shows ⚙️ Administración for admin role
 │   ├── NearbyRoutes.tsx
+│   ├── PlanTripMode.tsx           # Trip planner: Nominatim autocomplete + /plan endpoint
 │   ├── ReportButton.tsx
 │   ├── RoutePlanner.tsx
 │   └── TripPanel.tsx
 └── pages/
     ├── Home.tsx
     ├── Login.tsx
-    ├── Map.tsx
+    ├── Map.tsx                    # Main map page: wires all modes + geometry state
     ├── Register.tsx
     └── admin/
         ├── AdminLayout.tsx        # Sidebar (gray-900) + Outlet — NO Navbar
-        ├── AdminRoutes.tsx        # Bus routes CRUD table
+        ├── AdminRoutes.tsx        # Bus routes CRUD + geometry editor + Regenerar
         ├── AdminUsers.tsx         # Users table + role/active/delete actions
         └── AdminCompanies.tsx     # Companies table + CRUD + routes viewer
 ```
+
+#### CatchBusMode — 4 background monitors
+
+Active while a trip is running (`view === 'active'`). All monitors start on trip begin and are cleared on trip end.
+
+| Monitor | Interval | Trigger | Action |
+|---------|----------|---------|--------|
+| 1 — Auto-resolve trancón | 120 s | Bus moved > 200 m from report location | `PATCH /api/reports/:id/resolve`, clear ref |
+| 2 — Desvío detection | 30 s | Off all route stops > 250 m for ≥ 90 s | Banner with 3 options: report, get off, ignore 5 min |
+| 3 — Auto-cierre inactividad | 60 s | Movement < 50 m for ≥ 600 s | Modal "¿Sigues en el bus?"; auto-close after 120 s |
+| 4 — Alertas de bajada | 15 s | Destination set; premium/admin auto-activate, free pays 12 cr | Prepare (400 m), Now (200 m + vibrate), Missed banners |
+
+#### `api.ts` modules
+
+| Export | Endpoints |
+|--------|-----------|
+| `authApi` | register, login, getProfile |
+| `routesApi` | list, getById, search, nearby, create, update, delete, recommend, activeFeed, plan, regenerateGeometry |
+| `stopsApi` | listByRoute, add, delete, deleteByRoute |
+| `adminApi` | getCompanies |
+| `reportsApi` | getNearby, create, confirm, resolve |
+| `creditsApi` | getBalance, getHistory, spend |
+| `tripsApi` | getActive, getCurrent, getActiveBuses, start, updateLocation, end |
+| `usersApi` | getFavorites, addFavorite, removeFavorite |
 
 #### Admin panel routes
 
@@ -184,7 +228,7 @@ web/src/
 |------|-----------|-------------|
 | `/admin` | — | Redirects to `/admin/users` |
 | `/admin/users` | `AdminUsers` | Users table: change role, toggle active, delete |
-| `/admin/routes` | `AdminRoutes` | Bus routes CRUD |
+| `/admin/routes` | `AdminRoutes` | Bus routes CRUD + geometry editor + Regenerar per row |
 | `/admin/companies` | `AdminCompanies` | Companies CRUD + view associated routes |
 
 #### Admin API endpoints
@@ -222,19 +266,23 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 
 ### routes
 `id, name, code (UNIQUE), company, first_departure, last_departure, frequency_minutes, is_active, created_at`
-**Migration added:** `company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL`
+**Migrations added:** `company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL`, `geometry JSONB DEFAULT NULL`
 
 ### stops
 `id, route_id, name, latitude, longitude, stop_order, created_at`
 
 ### reports
 `id, user_id, route_id, type, latitude, longitude, description, is_active, confirmations, created_at, expires_at (NOW() + 30 min)`
+**Migrations added:** `report_lat DECIMAL(10,8)`, `report_lng DECIMAL(11,8)`, `resolved_at TIMESTAMPTZ DEFAULT NULL`
 
 ### credit_transactions
 `id, user_id, amount, type, description, created_at`
 
 ### active_trips
 `id, user_id, route_id, current_latitude, current_longitude, destination_stop_id, started_at, last_location_at, ended_at, credits_earned, is_active`
+
+### user_favorite_routes
+`id, user_id (→ users), route_id (→ routes), created_at` — `UNIQUE(user_id, route_id)`
 
 ---
 
@@ -259,9 +307,9 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 ### 2. Trip planner
 - User types destination
 - Start point = current GPS location
-- App finds routes connecting origin → destination
-- Shows multiple options ordered by proximity
-- User takes whichever bus arrives first
+- App finds routes connecting origin → destination via `/api/routes/plan`
+- Shows multiple options ordered by proximity to destination stop
+- Selecting a route fetches full geometry via `getById` and draws it on the map
 
 ### 3. "I boarded" flow
 - User taps "Me subí" (I boarded)
@@ -270,6 +318,7 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Phone transmits bus location in real time via WebSocket
 - Other users see the bus moving on the map
 - User earns +1 credit per minute transmitting
+- 4 background monitors activate (see CatchBusMode section)
 
 ### 4. "I got off" flow
 - User taps "Me bajé" (I got off)
@@ -277,10 +326,11 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Shows trip summary with credits earned
 - Option to rate the trip
 
-### 5. Drop-off alerts
-- App monitors GPS during trip
-- At 2 stops before destination → soft notification
-- At 1 stop before destination → strong alert
+### 5. Drop-off alerts (Monitor 4)
+- Auto-activated for premium/admin; costs 12 credits for free users
+- Prepare banner at 400 m from destination
+- "Bájate ya" alert + vibration at 200 m
+- Missed alert if bus passes destination
 
 ---
 
@@ -327,22 +377,24 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - React web with map
 - Auto-seed of Barranquilla real bus routes
 
-### Phase 2 ✅ Complete (Admin panel) / In Progress (real-time)
-**Admin panel — done:**
+### Phase 2 ✅ Complete
+**Admin panel:**
 - Role-based access control (`requireRole` middleware + `AdminRoute` guard)
 - Admin layout with sidebar (no Navbar)
 - `/admin/users` — full users table with role change, toggle active, delete
-- `/admin/routes` — bus routes CRUD
+- `/admin/routes` — bus routes CRUD + geometry editor (drag points, Regenerar per row)
 - `/admin/companies` — companies CRUD with routes viewer
 - Navbar link "⚙️ Administración" visible only to admins
 
-**Still in progress:**
-- User GPS location on map
-- Nearby routes by current location
-- Trip planner (origin → destination)
-- "I boarded / I got off" flow
-- Real-time bus tracking via WebSocket
-- Drop-off alerts
+**Real-time user flow:**
+- GPS location on map + nearby routes via active-feed endpoint
+- Trip planner (`PlanTripMode`) — Nominatim autocomplete + `/api/routes/plan`
+- "Me subí / Me bajé" flow (`CatchBusMode`) — full state machine
+- 4 background monitors: auto-resolve trancón, desvío detection, auto-cierre, drop-off alerts
+- Favorites system (`/api/users/favorites` — add, remove, list)
+- Self-resolve reports (`PATCH /api/reports/:id/resolve`)
+- Route geometry via OSRM (2-attempt: full route → segment-by-segment + straight-line fallback)
+- Geometry displayed on map: green polyline for active trip, blue for feed route selection
 
 ### Phase 3 — Upcoming
 - Wompi payments integration

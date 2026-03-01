@@ -13,6 +13,9 @@ import reportRoutes from './routes/reportRoutes';
 import creditRoutes from './routes/creditRoutes';
 import tripRoutes from './routes/tripRoutes';
 import adminRoutes from './routes/adminRoutes';
+import userRoutes from './routes/userRoutes';
+import traceRoutes from './routes/traceRoutes';
+import suggestionRoutes from './routes/suggestionRoutes';
 
 dotenv.config();
 
@@ -31,6 +34,9 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/credits', creditRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/traces', traceRoutes);
+app.use('/api/suggestions', suggestionRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

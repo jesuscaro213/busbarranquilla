@@ -128,7 +128,7 @@ export default function TripPanel({ userPosition, onTripChange, preselectedRoute
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl p-4 space-y-3 w-full max-w-xs">
+    <div className="bg-white rounded-2xl shadow-xl p-4 space-y-3 w-full">
       {/* Toast */}
       {toast && (
         <div className="bg-blue-600 text-white text-sm rounded-xl px-3 py-2 text-center">

@@ -11,6 +11,10 @@ import {
   updateCompany,
   toggleCompanyActive,
   deleteCompany,
+  toggleRouteActive,
+  scanBlogRoutes,
+  processImportedRoutes,
+  getPendingCount,
 } from '../controllers/adminController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
@@ -23,6 +27,12 @@ router.get('/users/:id', authMiddleware, requireRole('admin'), getUserById);
 router.patch('/users/:id/role', authMiddleware, requireRole('admin'), updateUserRole);
 router.patch('/users/:id/toggle-active', authMiddleware, requireRole('admin'), toggleUserActive);
 router.delete('/users/:id', authMiddleware, requireRole('admin'), deleteUser);
+
+// Routes — named routes BEFORE any /:id params
+router.get('/routes/pending-count', authMiddleware, requireRole('admin'), getPendingCount);
+router.post('/routes/scan-blog', authMiddleware, requireRole('admin'), scanBlogRoutes);
+router.post('/routes/process-imports', authMiddleware, requireRole('admin'), processImportedRoutes);
+router.patch('/routes/:id/toggle-active', authMiddleware, requireRole('admin'), toggleRouteActive);
 
 // Companies
 router.get('/companies', authMiddleware, requireRole('admin'), getAllCompanies);

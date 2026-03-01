@@ -182,6 +182,45 @@ export const getActiveTrip = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+// Obtener viaje actual con parada de destino (para UI de viaje en curso)
+export const getTripCurrent = async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as any).userId as number;
+
+  try {
+    const result = await pool.query(
+      `SELECT
+        at.id,
+        at.route_id,
+        r.name AS route_name,
+        r.code AS route_code,
+        at.started_at,
+        at.current_latitude,
+        at.current_longitude,
+        at.credits_earned,
+        s.latitude AS destination_lat,
+        s.longitude AS destination_lng,
+        s.name AS destination_stop_name
+       FROM active_trips at
+       JOIN routes r ON r.id = at.route_id
+       LEFT JOIN stops s ON s.id = at.destination_stop_id
+       WHERE at.user_id = $1 AND at.is_active = true
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      res.json({ trip: null });
+      return;
+    }
+
+    res.json({ trip: result.rows[0] });
+
+  } catch (error) {
+    console.error('Error obteniendo viaje actual:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Obtener todos los buses activos (para carga inicial del mapa)
 export const getActiveBuses = async (req: Request, res: Response): Promise<void> => {
   try {

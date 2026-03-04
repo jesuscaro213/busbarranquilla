@@ -20,6 +20,7 @@ interface BackendStop {
   latitude: number;
   longitude: number;
   stop_order: number;
+  leg?: 'ida' | 'regreso';
 }
 
 export default function AdminBuses() {
@@ -39,7 +40,7 @@ export default function AdminBuses() {
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   // ── Map modal state ───────────────────────────────────────────────────────
-  const [mapRoute, setMapRoute] = useState<(BusRoute & { geometry: [number, number][] | null }) | null>(null);
+  const [mapRoute, setMapRoute] = useState<(BusRoute & { geometry: [number, number][] | null; turnaround_idx: number | null }) | null>(null);
   const [mapStops, setMapStops] = useState<BackendStop[]>([]);
   const [mapStopsLoading, setMapStopsLoading] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -140,11 +141,11 @@ export default function AdminBuses() {
         routesApi.getById(route.id),
         stopsApi.listByRoute(route.id),
       ]);
-      const fullRoute = routeRes.data.route as { geometry: [number, number][] | null };
-      setMapRoute({ ...route, geometry: fullRoute.geometry ?? null });
+      const fullRoute = routeRes.data.route as { geometry: [number, number][] | null; turnaround_idx: number | null };
+      setMapRoute({ ...route, geometry: fullRoute.geometry ?? null, turnaround_idx: fullRoute.turnaround_idx ?? null });
       setMapStops(stopsRes.data.stops as BackendStop[]);
     } catch {
-      setMapRoute({ ...route, geometry: null });
+      setMapRoute({ ...route, geometry: null, turnaround_idx: null });
     } finally {
       setMapStopsLoading(false);
     }
@@ -184,14 +185,27 @@ export default function AdminBuses() {
       }).addTo(map);
 
       if (mapRoute.geometry && mapRoute.geometry.length >= 2) {
-        const coords = mapRoute.geometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple);
-        const pl = L.polyline(coords, {
-          color: mapRoute.color || '#1d4ed8',
-          weight: 5,
-          opacity: 0.85,
-        }).addTo(map);
-        polylineRef.current = pl;
-        map.fitBounds(pl.getBounds(), { padding: [40, 40] });
+        const geo = mapRoute.geometry;
+        const ti = mapRoute.turnaround_idx;
+
+        if (ti !== null && ti > 0 && ti < geo.length - 1) {
+          // Draw ida and regreso as separate polylines
+          const idaCoords = geo.slice(0, ti + 1).map(([lat, lng]) => [lat, lng] as L.LatLngTuple);
+          const regresoCoords = geo.slice(ti).map(([lat, lng]) => [lat, lng] as L.LatLngTuple);
+
+          const plIda = L.polyline(idaCoords, { color: '#1d4ed8', weight: 5, opacity: 0.9 }).addTo(map);
+          const plRegreso = L.polyline(regresoCoords, { color: '#ea580c', weight: 4, opacity: 0.75, dashArray: '8 5' }).addTo(map);
+          polylineRef.current = plIda; // store first for cleanup reference
+          // store regreso in a separate ref slot via a hack: attach to map for removal
+          (map as unknown as { _regresoLine?: L.Polyline })._regresoLine = plRegreso;
+
+          map.fitBounds(plIda.getBounds().extend(plRegreso.getBounds()), { padding: [40, 40] });
+        } else {
+          const coords = geo.map(([lat, lng]) => [lat, lng] as L.LatLngTuple);
+          const pl = L.polyline(coords, { color: mapRoute.color || '#1d4ed8', weight: 5, opacity: 0.85 }).addTo(map);
+          polylineRef.current = pl;
+          map.fitBounds(pl.getBounds(), { padding: [40, 40] });
+        }
       }
 
       mapRef.current = map;
@@ -202,7 +216,12 @@ export default function AdminBuses() {
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
       if (polylineRef.current) { polylineRef.current.remove(); polylineRef.current = null; }
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      if (mapRef.current) {
+        const regresoLine = (mapRef.current as unknown as { _regresoLine?: L.Polyline })._regresoLine;
+        if (regresoLine) regresoLine.remove();
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, [mapRoute]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -218,7 +237,8 @@ export default function AdminBuses() {
     mapStops.forEach((stop, i) => {
       const isFirst = i === 0;
       const isLast = i === total - 1 && total > 1;
-      const bg = isFirst ? '#16a34a' : isLast ? '#dc2626' : (mapRoute.color || '#1d4ed8');
+      const legColor = stop.leg === 'regreso' ? '#ea580c' : '#1d4ed8';
+      const bg = isFirst ? '#16a34a' : isLast ? '#dc2626' : legColor;
 
       const icon = L.divIcon({
         className: '',
@@ -229,7 +249,8 @@ export default function AdminBuses() {
       });
 
       const marker = L.marker([stop.latitude, stop.longitude], { icon });
-      marker.bindPopup(`<strong style="font-size:12px;font-family:sans-serif">${stop.name}</strong>`);
+      const legLabel = stop.leg === 'regreso' ? ' · tramo 2' : stop.leg === 'ida' ? ' · tramo 1' : '';
+      marker.bindPopup(`<strong style="font-size:12px;font-family:sans-serif">${stop.name}</strong><br><span style="font-size:11px;color:#6b7280">#${stop.stop_order}${legLabel}</span>`);
       marker.addTo(map);
       markersRef.current.push(marker);
     });
@@ -414,10 +435,7 @@ export default function AdminBuses() {
 
       {/* ── Map modal ──────────────────────────────────────────────────────── */}
       {mapRoute && (
-        <div
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
-          onClick={() => { setMapRoute(null); setMapStops([]); }}
-        >
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
           <div
             className="w-[92vw] h-[88vh] bg-white rounded-xl flex flex-col overflow-hidden shadow-2xl"
             onClick={e => e.stopPropagation()}
@@ -436,6 +454,18 @@ export default function AdminBuses() {
                 <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">
                   {mapStopsLoading ? 'Cargando paradas…' : `${mapStops.length} paradas`}
                 </span>
+                {!mapStopsLoading && mapRoute.turnaround_idx !== null && (
+                  <span className="flex items-center gap-2 text-xs whitespace-nowrap shrink-0">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-5 h-1 rounded bg-blue-700" />
+                      <span className="text-gray-500">Tramo 1</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-5 h-0.5 rounded bg-orange-600 opacity-75" style={{ backgroundImage: 'repeating-linear-gradient(90deg,#ea580c 0,#ea580c 8px,transparent 8px,transparent 13px)' }} />
+                      <span className="text-gray-500">Tramo 2</span>
+                    </span>
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => { setMapRoute(null); setMapStops([]); }}

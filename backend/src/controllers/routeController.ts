@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/database';
 import { fetchOSRMGeometry } from '../services/osrmService';
+import { computeLegsForRoute } from '../services/legService';
 
 // Listar todas las rutas activas (opcionalmente filtradas por type)
 export const listRoutes = async (req: Request, res: Response): Promise<void> => {
@@ -399,6 +400,7 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
           FROM stops s
           JOIN routes r ON r.id = s.route_id AND r.is_active = true
           JOIN origin_stops os ON os.route_id = s.route_id AND s.stop_order > os.origin_order
+          WHERE s.leg = 'ida'
           ORDER BY s.route_id,
             (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
               cos(radians(s.longitude) - radians($2)) +
@@ -504,6 +506,7 @@ export const regenerateGeometry = async (req: Request, res: Response): Promise<v
     }
 
     await pool.query('UPDATE routes SET geometry = $1 WHERE id = $2', [JSON.stringify(osrm.points), id]);
+    await computeLegsForRoute(parseInt(id as string, 10));
 
     res.json({ success: true, pointsCount: osrm.points.length, hadFallbacks: osrm.hadFallbacks });
 

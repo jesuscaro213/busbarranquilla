@@ -1,5 +1,6 @@
 import axios from 'axios';
 import pool from '../config/database';
+import { computeLegsForRoute } from '../services/legService';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
@@ -183,6 +184,8 @@ export async function importTransmetro(): Promise<ImportResult> {
           [routeId, stops[i].name, stops[i].lat, stops[i].lon, i + 1]
         );
       }
+
+      await computeLegsForRoute(routeId);
 
       console.log(
         `✅ [${type}] ${name} — ${stops.length} paradas, ${geometry.length} puntos`

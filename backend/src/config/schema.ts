@@ -200,6 +200,14 @@ const createTables = async () => {
     await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#1d4ed8'`);
     console.log('✅ Columnas type y color en routes');
 
+    // Detección de tramo ida/regreso
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS turnaround_idx INTEGER DEFAULT NULL`);
+    await pool.query(`
+      ALTER TABLE stops ADD COLUMN IF NOT EXISTS leg VARCHAR(10) DEFAULT 'ida'
+        CHECK (leg IN ('ida', 'regreso'))
+    `);
+    console.log('✅ Columnas turnaround_idx en routes y leg en stops');
+
     // Seed automático de usuario admin (debe correr después de todas las migraciones)
     const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
     if (adminCheck.rows.length === 0) {

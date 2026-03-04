@@ -1,6 +1,7 @@
 import axios from 'axios';
 import pool from '../config/database';
 import { fetchOSRMGeometry } from './osrmService';
+import { computeLegsForRoute } from './legService';
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const UA = 'Mozilla/5.0 (compatible; MiBusBot/1.0; +https://mibus.co)';
@@ -121,6 +122,7 @@ export async function processImports(
           `UPDATE routes SET geometry=$1 WHERE id=$2`,
           [JSON.stringify(osrm.points), route.id]
         );
+        await computeLegsForRoute(route.id);
       }
 
       await pool.query(`UPDATE routes SET status='done' WHERE id=$1`, [route.id]);

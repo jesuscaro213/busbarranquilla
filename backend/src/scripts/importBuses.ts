@@ -15,6 +15,7 @@ import axios from 'axios';
 import JSZip from 'jszip';
 import * as cheerio from 'cheerio';
 import pool from '../config/database';
+import { computeLegsForRoute } from '../services/legService';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -340,6 +341,7 @@ export async function importBuses(): Promise<ImportBusesResult> {
     try {
       const { routeId, isNew } = await upsertRoute(code, name, company, companyId, geometry);
       await replaceStops(routeId, stops);
+      await computeLegsForRoute(routeId);
 
       console.log(
         `${isNew ? '✅  nueva' : '🔄  actualizada'} — ${geometry.length} pts, ${stops.length} paradas`

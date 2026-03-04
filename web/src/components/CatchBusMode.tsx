@@ -9,12 +9,15 @@ interface Route {
   id: number;
   name: string;
   code: string;
+  type: string;
+  color: string | null;
   company_name: string | null;
   frequency_minutes: number | null;
   first_departure: string | null;
   last_departure: string | null;
   is_active: boolean;
   geometry: [number, number][] | null;
+  min_distance?: number; // km, only present from /nearby endpoint
 }
 
 interface ActiveTripFull {
@@ -43,6 +46,7 @@ interface Props {
   userPosition: [number, number] | null;
   onTripChange: (active: boolean) => void;
   onRouteGeometry?: (geom: [number, number][] | null) => void;
+  onBoardingStop?: (stop: { latitude: number; longitude: number; name: string } | null) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -84,18 +88,25 @@ function fmtTime(secs: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry }: Props) {
+export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry, onBoardingStop }: Props) {
   const { user } = useAuth();
 
   // Route list
   const [routes, setRoutes] = useState<Route[]>([]);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState('');
+  type RouteTypeFilter = 'all' | 'transmetro' | 'bus';
+  const [typeFilter, setTypeFilter] = useState<RouteTypeFilter>('all');
   const [loading, setLoading] = useState(true);
+  const [nearbyRoutes, setNearbyRoutes] = useState<Route[]>([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
 
   // Navigation state machine
   const [view, setView] = useState<View>('list');
   const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
+
+  // Boarding stop (nearest stop for selected route)
+  const [boardingStop, setBoardingStop] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
 
   // Modals
   const [showBoardConfirm, setShowBoardConfirm] = useState(false);
@@ -155,6 +166,16 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       lastGpsRef.current = Date.now();
       setGpsLost(false);
     }
+  }, [userPosition]);
+
+  // ── Fetch nearby routes when user position is known ────────────────────
+  useEffect(() => {
+    if (!userPosition) return;
+    setNearbyLoading(true);
+    routesApi.nearby(userPosition[0], userPosition[1], 0.5)
+      .then((res) => setNearbyRoutes(res.data.routes ?? []))
+      .catch(() => setNearbyRoutes([]))
+      .finally(() => setNearbyLoading(false));
   }, [userPosition]);
 
   // ── Monitor 1: auto-resolver trancón si el bus se movió >200m ─────────
@@ -437,6 +458,42 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     }
   };
 
+  // ── Select route: show geometry + nearest boarding stop ──────────────
+  const handleSelectRoute = useCallback((route: Route) => {
+    setSelectedRoute(route);
+    setShowBoardConfirm(false);
+    setView('waiting');
+    onRouteGeometry?.(route.geometry ?? null); // emit inmediato (puede ser null)
+    const pos = userPositionRef.current;
+
+    routesApi.getById(route.id).then((r) => {
+      const fullRoute = r.data.route as {
+        geometry?: [number, number][] | null;
+        stops?: { latitude: number; longitude: number; name: string }[];
+      };
+
+      // re-emit geometry from full route (overrides null from list)
+      if (fullRoute.geometry && fullRoute.geometry.length >= 2) {
+        onRouteGeometry?.(fullRoute.geometry);
+      }
+
+      const stops = fullRoute.stops ?? [];
+      if (stops.length === 0 || !pos) return;
+      const nearest = stops.reduce((best, s) => {
+        const d = haversineMeters(pos[0], pos[1], parseFloat(String(s.latitude)), parseFloat(String(s.longitude)));
+        const bd = haversineMeters(pos[0], pos[1], parseFloat(String(best.latitude)), parseFloat(String(best.longitude)));
+        return d < bd ? s : best;
+      });
+      const stop = {
+        latitude: parseFloat(String(nearest.latitude)),
+        longitude: parseFloat(String(nearest.longitude)),
+        name: nearest.name,
+      };
+      setBoardingStop(stop);
+      onBoardingStop?.(stop);
+    }).catch(() => {});
+  }, [onRouteGeometry, onBoardingStop]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Trip start ────────────────────────────────────────────────────────
   const handleStart = async () => {
     if (!selectedRoute) return;
@@ -455,6 +512,8 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       setElapsed(0);
       onTripChange(true);
       onRouteGeometry?.(selectedRoute?.geometry ?? null);
+      onBoardingStop?.(null);
+      setBoardingStop(null);
       startActiveIntervals(trip.started_at ?? new Date().toISOString());
       setShowBoardConfirm(false);
       setSelectedRoute(null);
@@ -558,16 +617,32 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   // ── Route filtering + grouping ────────────────────────────────────────
   const filtered = routes.filter((r) => {
     const q = search.toLowerCase();
-    return r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q);
+    const matchesSearch = r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.company_name ?? '').toLowerCase().includes(q);
+    const isTransmetro = r.type === 'transmetro' || r.type === 'alimentadora';
+    const matchesType =
+      typeFilter === 'all' ||
+      (typeFilter === 'transmetro' && isTransmetro) ||
+      (typeFilter === 'bus' && !isTransmetro);
+    return matchesSearch && matchesType;
   });
-  const favRoutes   = filtered.filter((r) => favorites.has(r.id));
-  const otherRoutes = filtered.filter((r) => !favorites.has(r.id));
-  const grouped: Record<string, Route[]> = {};
-  for (const r of otherRoutes) {
+  const favRoutes    = filtered.filter((r) => favorites.has(r.id));
+  const nonFavRoutes = filtered.filter((r) => !favorites.has(r.id));
+
+  const transmetroRoutes = nonFavRoutes
+    .filter((r) => r.type === 'transmetro' || r.type === 'alimentadora')
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const busRoutes = nonFavRoutes
+    .filter((r) => r.type !== 'transmetro' && r.type !== 'alimentadora')
+    .sort((a, b) => (a.company_name ?? a.name).localeCompare(b.company_name ?? b.name));
+
+  const busRoutesByCompany = busRoutes.reduce<Record<string, Route[]>>((acc, r) => {
     const key = r.company_name ?? 'Sin empresa';
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(r);
-  }
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(r);
+    return acc;
+  }, {});
+
   const activeTripCompany = activeTrip?.route_id
     ? (routes.find((r) => r.id === activeTrip.route_id)?.company_name ?? null)
     : null;
@@ -892,6 +967,28 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
           )}
         </div>
 
+        {/* Boarding stop guide */}
+        {boardingStop && (
+          <div className="bg-green-50 border border-green-100 rounded-2xl p-3.5 space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="text-lg shrink-0">📍</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-green-800 uppercase tracking-wide">
+                  Parada de abordaje
+                </p>
+                <p className="text-sm font-medium text-gray-800 truncate">
+                  {boardingStop.name?.trim() || 'Parada más cercana'}
+                </p>
+                {userPosition && (
+                  <p className="text-xs text-green-700 mt-0.5">
+                    🚶 {Math.round(haversineMeters(userPosition[0], userPosition[1], boardingStop.latitude, boardingStop.longitude))} m caminando
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Waiting indicator */}
         <div className="flex items-center justify-center gap-2 py-1">
           <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
@@ -924,7 +1021,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
 
         {/* Cancel */}
         <button
-          onClick={() => { setSelectedRoute(null); setView('list'); }}
+          onClick={() => { setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
           className="w-full text-gray-400 hover:text-gray-600 text-sm py-1.5 transition-colors"
         >
           El bus no llegó — cancelar
@@ -941,7 +1038,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
               <p className="text-sm text-gray-500 text-center">{selectedRoute.name}</p>
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={() => { setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); }}
+                  onClick={() => { setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
                   className="flex-1 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
                 >
                   No, cogí otro
@@ -969,6 +1066,60 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
           {toast.msg}
         </div>
       )}
+
+      {/* Cerca de ti */}
+      {(nearbyLoading || nearbyRoutes.length > 0) && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">📍 Cerca de ti</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {nearbyLoading
+              ? [0, 1, 2].map((i) => (
+                  <div key={i} className="shrink-0 w-24 h-16 bg-gray-100 rounded-xl animate-pulse" />
+                ))
+              : nearbyRoutes.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => handleSelectRoute(r)}
+                    className="shrink-0 flex flex-col items-start gap-0.5 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 hover:bg-blue-100 transition-colors min-w-[120px] max-w-[160px]"
+                  >
+                    <span className="text-xs font-bold text-gray-900 leading-tight truncate w-full text-left">
+                      {r.company_name ?? r.code}
+                    </span>
+                    <span className="text-[10px] text-gray-500 truncate w-full text-left leading-tight">
+                      {r.name}
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
+                        {r.code}
+                      </span>
+                      {r.min_distance !== undefined && (
+                        <span className="text-[10px] text-gray-400">
+                          {Math.round(r.min_distance * 1000)} m
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+          </div>
+        </div>
+      )}
+
+      {/* Type filter tabs */}
+      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+        {(['all', 'transmetro', 'bus'] as RouteTypeFilter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setTypeFilter(f)}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              typeFilter === f
+                ? 'bg-white shadow-sm text-gray-900'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {f === 'all' ? 'Todos' : f === 'transmetro' ? '🚇 Transmetro' : '🚌 Bus'}
+          </button>
+        ))}
+      </div>
 
       {/* Search */}
       <div className="relative">
@@ -999,7 +1150,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
                     key={r.id}
                     route={r}
                     isFav={true}
-                    onSelect={(route) => { setSelectedRoute(route); setShowBoardConfirm(false); setView('waiting'); }}
+                    onSelect={handleSelectRoute}
                     onToggleFav={toggleFavorite}
                   />
                 ))}
@@ -1007,24 +1158,46 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
             </section>
           )}
 
-          {Object.entries(grouped).map(([company, compRoutes]) => (
-            <section key={company}>
+          {transmetroRoutes.length > 0 && (
+            <section>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                {company}
+                🚇 Transmetro
               </h3>
               <div className="space-y-1">
-                {compRoutes.map((r) => (
+                {transmetroRoutes.map((r) => (
                   <RouteRow
                     key={r.id}
                     route={r}
                     isFav={false}
-                    onSelect={(route) => { setSelectedRoute(route); setShowBoardConfirm(false); setView('waiting'); }}
+                    onSelect={handleSelectRoute}
                     onToggleFav={toggleFavorite}
                   />
                 ))}
               </div>
             </section>
-          ))}
+          )}
+
+          {Object.entries(busRoutesByCompany)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([company, companyRoutes]) => (
+              <section key={company}>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  🚌 {company}
+                </h3>
+                <div className="space-y-1">
+                  {companyRoutes.map((r) => (
+                    <RouteRow
+                      key={r.id}
+                      route={r}
+                      isFav={false}
+                      onSelect={handleSelectRoute}
+                      onToggleFav={toggleFavorite}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))
+          }
 
           {filtered.length === 0 && (
             <p className="text-gray-400 text-sm text-center py-6">Sin resultados</p>
@@ -1048,16 +1221,29 @@ function RouteRow({
   onSelect: (r: Route) => void;
   onToggleFav: (e: React.MouseEvent, id: number) => void;
 }) {
+  const routeColor = route.color || '#1d4ed8';
+
   return (
     <div
       onClick={() => onSelect(route)}
-      className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-100 transition-colors text-left cursor-pointer"
+      className="w-full flex items-center gap-2.5 px-3 py-2.5 bg-white border border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-100 transition-colors text-left cursor-pointer"
     >
-      <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-md shrink-0">
+      {/* Color dot */}
+      <div
+        className="w-3 h-3 rounded-full shrink-0 border border-black/10"
+        style={{ backgroundColor: routeColor }}
+      />
+      {/* Code badge with route color */}
+      <span
+        className="text-white text-xs font-bold px-2 py-0.5 rounded-md shrink-0"
+        style={{ backgroundColor: routeColor }}
+      >
         {route.code}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-gray-800 truncate">{route.name}</p>
+        <p className="text-sm font-medium text-gray-800 truncate">
+          {route.company_name ?? route.name}
+        </p>
         {route.frequency_minutes && (
           <p className="text-xs text-gray-400">Cada {route.frequency_minutes} min</p>
         )}

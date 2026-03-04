@@ -198,6 +198,15 @@ web/src/
         └── AdminCompanies.tsx     # Companies table + CRUD + routes viewer
 ```
 
+#### CatchBusMode — "Cerca de ti" section
+
+Above the filter tabs and search, CatchBusMode shows a **horizontal scroll of nearby route cards** fetched from `/api/routes/nearby?lat=X&lng=Y&radius=0.5` when `userPosition` is available.
+
+- Cards show: route name (where the bus goes), company name (secondary, gray), code badge, distance in meters
+- Tap → same `handleSelectRoute` flow as selecting from the main list (goes to waiting view)
+- Skeleton loading placeholders while fetching
+- Section hidden if no nearby routes returned
+
 #### CatchBusMode — 4 background monitors
 
 Active while a trip is running (`view === 'active'`). All monitors start on trip begin and are cleared on trip end.
@@ -305,11 +314,12 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Show active buses reported by other users in real time
 
 ### 2. Trip planner
-- User types destination
-- Start point = current GPS location
+- User types destination (or picks on map)
+- Start point = current GPS location, or typed address (geocoded via Nominatim + Overpass API for Colombian addresses)
+- Before entering destination: **"Buses en tu zona"** panel shows routes ≤500 m from origin — tap any to preview its full geometry on the map; tapping again deselects; switching routes clears the previous one immediately
 - App finds routes connecting origin → destination via `/api/routes/plan`
 - Shows multiple options ordered by proximity to destination stop
-- Selecting a route fetches full geometry via `getById` and draws it on the map
+- Selecting a result clips the route geometry between boarding stop and dropoff stop and draws it on the map (blue polyline); if clipping fails, falls back to full route geometry, then all stops
 
 ### 3. "I boarded" flow
 - User taps "Me subí" (I boarded)
@@ -388,13 +398,32 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 
 **Real-time user flow:**
 - GPS location on map + nearby routes via active-feed endpoint
-- Trip planner (`PlanTripMode`) — Nominatim autocomplete + `/api/routes/plan`
+- Trip planner (`PlanTripMode`) — Nominatim + Overpass autocomplete + `/api/routes/plan`
 - "Me subí / Me bajé" flow (`CatchBusMode`) — full state machine
 - 4 background monitors: auto-resolve trancón, desvío detection, auto-cierre, drop-off alerts
 - Favorites system (`/api/users/favorites` — add, remove, list)
 - Self-resolve reports (`PATCH /api/reports/:id/resolve`)
 - Route geometry via OSRM (2-attempt: full route → segment-by-segment + straight-line fallback)
 - Geometry displayed on map: green polyline for active trip, blue for feed route selection
+
+### Phase 2.5 ✅ Complete
+**"Cerca de ti" in CatchBusMode:**
+- Horizontal scroll of route cards above the filter/search, auto-fetched from `/api/routes/nearby` when GPS available
+- Cards show: route name → company name → code badge → distance in meters
+- Tap → direct boarding flow (same as selecting from list)
+
+**"Buses en tu zona" in PlanTripMode:**
+- Vertical list of routes ≤500 m from origin, shown before destination is entered
+- Updates automatically when origin changes (GPS or typed address)
+- Tap → previews route geometry on map immediately (uses `geometry` from `/nearby` response; fallback to stops fetch if null)
+- Mini info bar: "¿Va a tu destino? Escríbelo arriba ↑" + ✕ to clear
+- Race condition guard: `previewRouteIdRef` ensures stale async results never overwrite a newer selection
+- Section disappears once plan results are shown
+
+**Map geometry fixes:**
+- "← Volver" in `Map.tsx` trip mode now clears `activeTripGeometry` + `catchBusBoardingStop`
+- Route clipping in `handleSelectRoute` falls back to full geometry (then all stops) if segment indices are invalid
+- Removed "Cómo llegar a pie" (Google Maps external link) from waiting view
 
 ### Phase 3 — Upcoming
 - Wompi payments integration

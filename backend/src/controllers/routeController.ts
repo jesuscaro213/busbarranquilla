@@ -2,16 +2,24 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import { fetchOSRMGeometry } from '../services/osrmService';
 
-// Listar todas las rutas activas
-export const listRoutes = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const result = await pool.query(
-      `SELECT r.*, c.name AS company_name
-        FROM routes r
-        LEFT JOIN companies c ON c.id = r.company_id
-        ORDER BY r.name ASC`
-    );
+// Listar todas las rutas activas (opcionalmente filtradas por type)
+export const listRoutes = async (req: Request, res: Response): Promise<void> => {
+  const { type } = req.query;
 
+  try {
+    let query = `SELECT r.*, c.name AS company_name
+      FROM routes r
+      LEFT JOIN companies c ON c.id = r.company_id`;
+
+    if (type === 'transmetro') {
+      query += ` WHERE r.type IN ('transmetro', 'alimentadora')`;
+    } else if (type === 'bus') {
+      query += ` WHERE r.type = 'bus'`;
+    }
+
+    query += ` ORDER BY r.name ASC`;
+
+    const result = await pool.query(query);
     res.json({ routes: result.rows });
 
   } catch (error) {
@@ -134,25 +142,31 @@ export const getNearbyRoutes = async (req: Request, res: Response): Promise<void
 
   try {
     const result = await pool.query(
-      `SELECT DISTINCT ON (r.id) r.*,
-              MIN(
-                6371 * acos(
-                  cos(radians($1)) * cos(radians(s.latitude)) *
-                  cos(radians(s.longitude) - radians($2)) +
-                  sin(radians($1)) * sin(radians(s.latitude))
-                )
-              ) OVER (PARTITION BY r.id) AS min_distance
-       FROM routes r
-       JOIN stops s ON s.route_id = r.id
-       WHERE r.is_active = true
-         AND (
-           6371 * acos(
-             cos(radians($1)) * cos(radians(s.latitude)) *
-             cos(radians(s.longitude) - radians($2)) +
-             sin(radians($1)) * sin(radians(s.latitude))
-           )
-         ) < $3
-       ORDER BY r.id, min_distance ASC`,
+      `SELECT * FROM (
+         SELECT DISTINCT ON (r.id)
+           r.*,
+           COALESCE(c.name, r.company) AS company_name,
+           MIN(
+             6371 * acos(LEAST(1.0,
+               cos(radians($1)) * cos(radians(s.latitude)) *
+               cos(radians(s.longitude) - radians($2)) +
+               sin(radians($1)) * sin(radians(s.latitude))
+             ))
+           ) OVER (PARTITION BY r.id) AS min_distance
+         FROM routes r
+         JOIN stops s ON s.route_id = r.id
+         LEFT JOIN companies c ON c.id = r.company_id
+         WHERE r.is_active = true
+           AND (
+             6371 * acos(LEAST(1.0,
+               cos(radians($1)) * cos(radians(s.latitude)) *
+               cos(radians(s.longitude) - radians($2)) +
+               sin(radians($1)) * sin(radians(s.latitude))
+             ))
+           ) < $3
+         ORDER BY r.id, min_distance ASC
+       ) sub
+       ORDER BY min_distance ASC`,
       [parseFloat(lat as string), parseFloat(lng as string), radiusKm]
     );
 
@@ -315,9 +329,11 @@ export const getActiveFeed = async (_req: Request, res: Response): Promise<void>
   }
 };
 
-// Planificador de destino: rutas cuyas paradas estén a ≤1 km de destLat/destLng
+/// Planificador de destino: rutas cuyas paradas estén a ≤1 km de destino
+// Si se proveen originLat/originLng, verifica que el bus pase por el origen
+// ANTES que por el destino (stop_order del origen < stop_order del destino).
 export const getPlanRoutes = async (req: Request, res: Response): Promise<void> => {
-  const { destLat, destLng } = req.query;
+  const { destLat, destLng, originLat, originLng } = req.query;
 
   if (!destLat || !destLng) {
     res.status(400).json({ message: 'destLat y destLng son obligatorios' });
@@ -332,55 +348,135 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
     return;
   }
 
+  const oLat = originLat ? parseFloat(originLat as string) : null;
+  const oLng = originLng ? parseFloat(originLng as string) : null;
+  const hasOrigin = oLat !== null && oLng !== null && !isNaN(oLat) && !isNaN(oLng);
+
   try {
-    const result = await pool.query(
-      `WITH nearest_stops AS (
-        SELECT DISTINCT ON (s.route_id)
-          s.route_id,
-          s.name AS nearest_stop_name,
-          s.latitude AS nearest_stop_lat,
-          s.longitude AS nearest_stop_lng,
-          ROUND(
-            (6371 * acos(
-              cos(radians($1)) * cos(radians(s.latitude)) *
+    // When origin is provided, enforce directional constraint:
+    // First find the nearest stop to the origin, then among all stops near the destination
+    // only consider those with a higher stop_order (i.e. later in the route sequence).
+    // This is more robust than comparing just the two nearest stops, because the destination
+    // may have a closer stop that happens to be before the origin, but also a valid stop after it.
+    const query = hasOrigin
+      ? `WITH origin_stops AS (
+          SELECT DISTINCT ON (s.route_id)
+            s.route_id,
+            s.stop_order AS origin_order,
+            ROUND(
+              (6371 * acos(LEAST(1.0,
+                cos(radians($3)) * cos(radians(s.latitude)) *
+                cos(radians(s.longitude) - radians($4)) +
+                sin(radians($3)) * sin(radians(s.latitude))
+              )) * 1000)::numeric
+            ) AS origin_distance_meters
+          FROM stops s
+          JOIN routes r ON r.id = s.route_id AND r.is_active = true
+          WHERE (6371 * acos(LEAST(1.0,
+              cos(radians($3)) * cos(radians(s.latitude)) *
+              cos(radians(s.longitude) - radians($4)) +
+              sin(radians($3)) * sin(radians(s.latitude))
+            ))) <= 0.6
+          ORDER BY s.route_id,
+            (6371 * acos(LEAST(1.0, cos(radians($3)) * cos(radians(s.latitude)) *
+              cos(radians(s.longitude) - radians($4)) +
+              sin(radians($3)) * sin(radians(s.latitude))
+            ))) ASC
+        ),
+        dest_stops AS (
+          SELECT DISTINCT ON (s.route_id)
+            s.route_id,
+            s.name       AS nearest_stop_name,
+            s.latitude   AS nearest_stop_lat,
+            s.longitude  AS nearest_stop_lng,
+            s.stop_order AS dest_order,
+            ROUND(
+              (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
+                cos(radians(s.longitude) - radians($2)) +
+                sin(radians($1)) * sin(radians(s.latitude))
+              )) * 1000)::numeric
+            ) AS distance_meters
+          FROM stops s
+          JOIN routes r ON r.id = s.route_id AND r.is_active = true
+          JOIN origin_stops os ON os.route_id = s.route_id AND s.stop_order > os.origin_order
+          ORDER BY s.route_id,
+            (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
               cos(radians(s.longitude) - radians($2)) +
               sin(radians($1)) * sin(radians(s.latitude))
-            ) * 1000)::numeric
-          ) AS distance_meters
-        FROM stops s
-        JOIN routes r ON r.id = s.route_id AND r.is_active = true
-        ORDER BY s.route_id,
-          (6371 * acos(
-            cos(radians($1)) * cos(radians(s.latitude)) *
-            cos(radians(s.longitude) - radians($2)) +
-            sin(radians($1)) * sin(radians(s.latitude))
-          )) ASC
-      ),
-      last_reports AS (
-        SELECT DISTINCT ON (route_id)
-          route_id,
-          created_at AS last_report_at,
-          ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS minutes_ago
-        FROM reports
-        WHERE is_active = true
-        ORDER BY route_id, created_at DESC
-      )
-      SELECT
-        r.id, r.name, r.code,
-        COALESCE(c.name, r.company) AS company_name,
-        ns.nearest_stop_name, ns.nearest_stop_lat, ns.nearest_stop_lng,
-        ns.distance_meters,
-        r.frequency_minutes,
-        lr.last_report_at,
-        lr.minutes_ago
-      FROM nearest_stops ns
-      JOIN routes r ON r.id = ns.route_id
-      LEFT JOIN companies c ON c.id = r.company_id
-      LEFT JOIN last_reports lr ON lr.route_id = r.id
-      WHERE ns.distance_meters <= 1000
-      ORDER BY ns.distance_meters ASC`,
-      [lat, lng]
-    );
+            ))) ASC
+        ),
+        last_reports AS (
+          SELECT DISTINCT ON (route_id)
+            route_id,
+            created_at AS last_report_at,
+            ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS minutes_ago
+          FROM reports
+          WHERE is_active = true
+          ORDER BY route_id, created_at DESC
+        )
+        SELECT
+          r.id, r.name, r.code,
+          COALESCE(c.name, r.company) AS company_name,
+          ds.nearest_stop_name, ds.nearest_stop_lat, ds.nearest_stop_lng,
+          ds.distance_meters,
+          os.origin_distance_meters,
+          (ds.dest_order - os.origin_order) AS stop_difference,
+          r.frequency_minutes,
+          lr.last_report_at,
+          lr.minutes_ago
+        FROM dest_stops ds
+        JOIN origin_stops os ON os.route_id = ds.route_id
+        JOIN routes r ON r.id = ds.route_id
+        LEFT JOIN companies c ON c.id = r.company_id
+        LEFT JOIN last_reports lr ON lr.route_id = r.id
+        WHERE ds.distance_meters <= 1000
+        ORDER BY (os.origin_distance_meters + (ds.dest_order - os.origin_order) * 500 + ds.distance_meters) ASC`
+      : `WITH nearest_stops AS (
+          SELECT DISTINCT ON (s.route_id)
+            s.route_id,
+            s.name AS nearest_stop_name,
+            s.latitude AS nearest_stop_lat,
+            s.longitude AS nearest_stop_lng,
+            ROUND(
+              (6371 * acos(LEAST(1, cos(radians($1)) * cos(radians(s.latitude)) *
+                cos(radians(s.longitude) - radians($2)) +
+                sin(radians($1)) * sin(radians(s.latitude))
+              )) * 1000)::numeric
+            ) AS distance_meters
+          FROM stops s
+          JOIN routes r ON r.id = s.route_id AND r.is_active = true
+          ORDER BY s.route_id,
+            (6371 * acos(LEAST(1, cos(radians($1)) * cos(radians(s.latitude)) *
+              cos(radians(s.longitude) - radians($2)) +
+              sin(radians($1)) * sin(radians(s.latitude))
+            ))) ASC
+        ),
+        last_reports AS (
+          SELECT DISTINCT ON (route_id)
+            route_id,
+            created_at AS last_report_at,
+            ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS minutes_ago
+          FROM reports
+          WHERE is_active = true
+          ORDER BY route_id, created_at DESC
+        )
+        SELECT
+          r.id, r.name, r.code,
+          COALESCE(c.name, r.company) AS company_name,
+          ns.nearest_stop_name, ns.nearest_stop_lat, ns.nearest_stop_lng,
+          ns.distance_meters,
+          r.frequency_minutes,
+          lr.last_report_at,
+          lr.minutes_ago
+        FROM nearest_stops ns
+        JOIN routes r ON r.id = ns.route_id
+        LEFT JOIN companies c ON c.id = r.company_id
+        LEFT JOIN last_reports lr ON lr.route_id = r.id
+        WHERE ns.distance_meters <= 1000
+        ORDER BY ns.distance_meters ASC`;
+
+    const params = hasOrigin ? [lat, lng, oLat, oLng] : [lat, lng];
+    const result = await pool.query(query, params);
 
     res.json({ routes: result.rows });
 

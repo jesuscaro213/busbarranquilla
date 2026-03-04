@@ -1,9 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { reportsApi, tripsApi } from '../services/api';
+import { reportsApi, tripsApi, routesApi } from '../services/api';
 import { getSocket, disconnectSocket } from '../services/socket';
-import { useState } from 'react';
 import type { RouteRecommendation } from './RoutePlanner';
 
 // Fix Leaflet default icon (Vite asset issue)
@@ -47,6 +46,8 @@ interface Props {
   planDest?: { lat: number; lng: number } | null;
   planRouteStops?: { latitude: number; longitude: number }[];
   planDropoffStop?: { latitude: number; longitude: number; name: string } | null;
+  catchBusBoardingStop?: { latitude: number; longitude: number; name: string } | null;
+  catchBusUserPosition?: [number, number] | null;
 }
 
 // Centro de Barranquilla
@@ -438,6 +439,99 @@ function ActiveTripLayer({ geometry }: { geometry?: [number, number][] | null })
   return null;
 }
 
+// Componente interno: marcador "Súbete aquí" + línea caminata para CatchBusMode vista 'waiting'
+function BoardingMarkerLayer({
+  stop,
+  userPosition,
+}: {
+  stop: { latitude: number; longitude: number; name: string } | null | undefined;
+  userPosition?: [number, number] | null;
+}) {
+  const map = useMap();
+  const markerRef = useRef<L.Marker | null>(null);
+  const lineRef = useRef<L.Polyline | null>(null);
+
+  useEffect(() => {
+    if (markerRef.current) { map.removeLayer(markerRef.current); markerRef.current = null; }
+    if (lineRef.current) { map.removeLayer(lineRef.current); lineRef.current = null; }
+    if (!stop) return;
+
+    markerRef.current = L.marker([stop.latitude, stop.longitude], {
+      icon: BOARDING_ICON,
+      zIndexOffset: 800,
+    }).addTo(map).bindPopup(`<b>Súbete aquí</b><br>${stop.name?.trim() || 'Parada más cercana'}`);
+
+    // Dashed walking line from user to boarding stop
+    if (userPosition) {
+      lineRef.current = L.polyline(
+        [userPosition, [stop.latitude, stop.longitude]],
+        { color: '#16a34a', weight: 3, dashArray: '8 6', opacity: 0.8 }
+      ).addTo(map);
+
+      // Fit both user and stop in view
+      map.fitBounds(
+        L.latLngBounds([userPosition, [stop.latitude, stop.longitude]]),
+        { padding: [60, 60], maxZoom: 17 }
+      );
+    } else {
+      map.flyTo([stop.latitude, stop.longitude], 15, { duration: 1.0 });
+    }
+
+    return () => {
+      if (markerRef.current) { map.removeLayer(markerRef.current); markerRef.current = null; }
+      if (lineRef.current) { map.removeLayer(lineRef.current); lineRef.current = null; }
+    };
+  }, [stop, map]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
+// ─── Capa de todas las rutas (filtrable por tipo) ─────────────────────────────
+
+type RouteFilter = 'all' | 'transmetro' | 'bus';
+
+interface RouteWithGeometry {
+  id: number;
+  type: string;
+  color: string | null;
+  geometry: [number, number][] | null;
+}
+
+function RouteGeometryLayer({ filter }: { filter: RouteFilter }) {
+  const map = useMap();
+  const polylinesRef = useRef<L.Polyline[]>([]);
+
+  useEffect(() => {
+    polylinesRef.current.forEach((p) => map.removeLayer(p));
+    polylinesRef.current = [];
+
+    if (filter === 'all') return;
+
+    routesApi.list({ type: filter }).then((res) => {
+      const routes = res.data.routes as RouteWithGeometry[];
+      for (const route of routes) {
+        if (!route.geometry || route.geometry.length < 2) continue;
+
+        const isTransmetro = route.type === 'transmetro' || route.type === 'alimentadora';
+        const color = isTransmetro ? (route.color || '#e60000') : '#1d4ed8';
+
+        const pl = L.polyline(
+          route.geometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+          { color, weight: 3, opacity: 0.7 }
+        ).addTo(map);
+        polylinesRef.current.push(pl);
+      }
+    }).catch(() => {});
+
+    return () => {
+      polylinesRef.current.forEach((p) => map.removeLayer(p));
+      polylinesRef.current = [];
+    };
+  }, [filter, map]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
 // Componente interno: carga buses activos y suscribe a eventos de socket
 function BusTracker() {
   const map = useMap();
@@ -495,6 +589,12 @@ function BusTracker() {
   return null;
 }
 
+const FILTER_LABELS: Record<RouteFilter, string> = {
+  all: 'Todos',
+  transmetro: '🚇 Transmetro',
+  bus: '🚌 Buses',
+};
+
 export default function MapView({
   onMapClick,
   refreshTrigger,
@@ -510,8 +610,11 @@ export default function MapView({
   planDest,
   planRouteStops = [],
   planDropoffStop,
+  catchBusBoardingStop,
+  catchBusUserPosition,
 }: Props) {
   const [reports, setReports] = useState<Report[]>([]);
+  const [routeFilter, setRouteFilter] = useState<RouteFilter>('all');
 
   useEffect(() => {
     reportsApi
@@ -521,6 +624,25 @@ export default function MapView({
   }, [refreshTrigger]);
 
   return (
+    <div className="relative h-full w-full">
+
+      {/* ── Filter toggle buttons ────────────────────────────────────────── */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[900] flex items-center gap-0.5 bg-white/90 backdrop-blur-sm rounded-full px-1.5 py-1 shadow-md pointer-events-auto">
+        {(['all', 'transmetro', 'bus'] as RouteFilter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setRouteFilter(f)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              routeFilter === f
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {FILTER_LABELS[f]}
+          </button>
+        ))}
+      </div>
+
     <MapContainer
       center={BARRANQUILLA_CENTER}
       zoom={13}
@@ -535,8 +657,11 @@ export default function MapView({
       <UserLocationTracker onUserLocation={onUserLocation} gpsEnabled={gpsEnabled} />
       <BusTracker />
       <MapFlyTo center={destinationCenter} />
+      {/* All-routes layer — always behind specific layers */}
+      <RouteGeometryLayer filter={routeFilter} />
       <FeedRouteLayer stops={feedRouteStops} geometry={feedRouteGeometry} />
       <ActiveTripLayer geometry={activeTripGeometry} />
+      <BoardingMarkerLayer stop={catchBusBoardingStop} userPosition={catchBusUserPosition} />
       <PlanLayer
         origin={planOrigin}
         dest={planDest}
@@ -582,5 +707,6 @@ export default function MapView({
         );
       })}
     </MapContainer>
+    </div>
   );
 }

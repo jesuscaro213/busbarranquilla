@@ -1,5 +1,5 @@
 import pool from './database';
-import { seedRoutes } from '../scripts/seedRoutes';
+import bcrypt from 'bcryptjs';
 
 const createTables = async () => {
   try {
@@ -115,14 +115,6 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla active_trips creada');
 
-    // Seed automático si la tabla de rutas está vacía
-    const { rows } = await pool.query('SELECT COUNT(*) FROM routes');
-    if (parseInt(rows[0].count, 10) === 0) {
-      console.log('📦 Tabla routes vacía — ejecutando seed de Barranquilla...');
-      const summary = await seedRoutes(pool);
-      console.log(`✅ Seed completado: ${summary.routesInserted} rutas, ${summary.stopsInserted} paradas`);
-    }
-
     // Migraciones seguras para campos nuevos en tabla users
     await pool.query(`
       ALTER TABLE users
@@ -202,6 +194,24 @@ const createTables = async () => {
       CREATE UNIQUE INDEX IF NOT EXISTS companies_name_unique ON companies(name)
     `);
     console.log('✅ Índice único en companies(name)');
+
+    // Tipo de servicio y color de línea
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'bus'`);
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#1d4ed8'`);
+    console.log('✅ Columnas type y color en routes');
+
+    // Seed automático de usuario admin (debe correr después de todas las migraciones)
+    const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
+    if (adminCheck.rows.length === 0) {
+      const hash = await bcrypt.hash('MiBus@Admin1', 10);
+      await pool.query(
+        `INSERT INTO users (name, email, password, role, is_active, is_premium, credits)
+         VALUES ('Administrador', 'admin@mibus.co', $1, 'admin', true, true, 9999)
+         ON CONFLICT (email) DO UPDATE SET role = 'admin', is_active = true`,
+        [hash]
+      );
+      console.log('👤 Usuario admin creado: admin@mibus.co');
+    }
 
     console.log('🎉 Base de datos lista');
 

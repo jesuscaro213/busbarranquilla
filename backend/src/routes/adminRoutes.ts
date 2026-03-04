@@ -15,6 +15,10 @@ import {
   scanBlogRoutes,
   processImportedRoutes,
   getPendingCount,
+  importOSMTransmetro,
+  importOSMBuses,
+  listTransmetroRoutes,
+  listBusRoutes,
 } from '../controllers/adminController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
@@ -32,6 +36,10 @@ router.delete('/users/:id', authMiddleware, requireRole('admin'), deleteUser);
 router.get('/routes/pending-count', authMiddleware, requireRole('admin'), getPendingCount);
 router.post('/routes/scan-blog', authMiddleware, requireRole('admin'), scanBlogRoutes);
 router.post('/routes/process-imports', authMiddleware, requireRole('admin'), processImportedRoutes);
+router.post('/routes/import-transmetro', authMiddleware, requireRole('admin'), importOSMTransmetro);
+router.post('/routes/import-buses', authMiddleware, requireRole('admin'), importOSMBuses);
+router.get('/transmetro', authMiddleware, requireRole('admin'), listTransmetroRoutes);
+router.get('/buses', authMiddleware, requireRole('admin'), listBusRoutes);
 router.patch('/routes/:id/toggle-active', authMiddleware, requireRole('admin'), toggleRouteActive);
 
 // Companies

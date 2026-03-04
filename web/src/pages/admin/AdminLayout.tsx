@@ -3,7 +3,8 @@ import { useAuth } from '../../context/AuthContext';
 
 const navItems = [
   { to: '/admin/users', label: 'Usuarios', emoji: '👥' },
-  { to: '/admin/routes', label: 'Rutas', emoji: '🚌' },
+  { to: '/admin/buses', label: 'Buses', emoji: '🚍' },
+  { to: '/admin/transmetro', label: 'Transmetro', emoji: '🚇' },
   { to: '/admin/companies', label: 'Empresas', emoji: '🏢' },
 ];
 

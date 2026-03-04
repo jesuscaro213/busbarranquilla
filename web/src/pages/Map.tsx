@@ -72,11 +72,21 @@ export default function Map() {
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedSelectedStops, setFeedSelectedStops] = useState<FeedStop[]>([]);
 
+  // CatchBusMode: boarding stop marker
+  const [catchBusBoardingStop, setCatchBusBoardingStop] = useState<{
+    latitude: number; longitude: number; name: string;
+  } | null>(null);
+
   // Plan mode map state
   const [planOrigin, setPlanOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [planDest, setPlanDest] = useState<{ lat: number; lng: number } | null>(null);
   const [planRouteStops, setPlanRouteStops] = useState<{ latitude: number; longitude: number }[]>([]);
   const [planDropoffStop, setPlanDropoffStop] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
+
+  // Map pick mode for planner
+  const [mapPickMode, setMapPickMode] = useState<'none' | 'origin' | 'dest'>('none');
+  const [mapPickedOrigin, setMapPickedOrigin] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapPickedDest, setMapPickedDest] = useState<{ lat: number; lng: number } | null>(null);
 
   // ── Credits popup: close on outside click ─────────────────────────────────
   useEffect(() => {
@@ -127,8 +137,23 @@ export default function Map() {
   // ── Map handlers ───────────────────────────────────────────────────────────
   function handleMapClick(lat: number, lng: number) {
     if (!user || isOnTrip) return;
-    setClickedPos({ lat, lng });
     setShowCreditsPopup(false);
+
+    // Planner map pick mode intercepts the click
+    if (mapPickMode !== 'none') {
+      if (mapPickMode === 'dest') {
+        setMapPickedDest({ lat, lng });
+        setMapPickedOrigin(null);
+      } else {
+        setMapPickedOrigin({ lat, lng });
+        setMapPickedDest(null);
+      }
+      setMapPickMode('none');
+      setSheetState('middle');
+      return;
+    }
+
+    setClickedPos({ lat, lng });
   }
 
   function handleReported() {
@@ -263,7 +288,11 @@ export default function Map() {
         return (
           <div className="p-4 space-y-3">
             <button
-              onClick={() => setSheetMode('feed')}
+              onClick={() => {
+                setSheetMode('feed');
+                setActiveTripGeometry(null);
+                setCatchBusBoardingStop(null);
+              }}
               className="text-gray-400 hover:text-gray-700 text-sm flex items-center gap-1 mb-1"
             >
               ← Volver
@@ -272,6 +301,7 @@ export default function Map() {
               userPosition={userPosition}
               onTripChange={setIsOnTrip}
               onRouteGeometry={setActiveTripGeometry}
+              onBoardingStop={setCatchBusBoardingStop}
             />
           </div>
         );
@@ -286,6 +316,9 @@ export default function Map() {
                 setPlanDest(null);
                 setPlanRouteStops([]);
                 setPlanDropoffStop(null);
+                setMapPickMode('none');
+                setMapPickedOrigin(null);
+                setMapPickedDest(null);
               }}
               className="text-gray-400 hover:text-gray-700 text-sm flex items-center gap-1 mb-3"
             >
@@ -293,6 +326,14 @@ export default function Map() {
             </button>
             <PlanTripMode
               userPosition={userPosition}
+              mapPickedOrigin={mapPickedOrigin}
+              mapPickedDest={mapPickedDest}
+              onRequestMapPick={(field) => {
+                setMapPickedOrigin(null);
+                setMapPickedDest(null);
+                setMapPickMode(field);
+                setSheetState('collapsed');
+              }}
               onPlanUpdate={({ origin, dest, routeStops, dropoffStop }) => {
                 setPlanOrigin(origin);
                 setPlanDest(dest);
@@ -325,6 +366,8 @@ export default function Map() {
         planDest={planDest}
         planRouteStops={planRouteStops}
         planDropoffStop={planDropoffStop}
+        catchBusBoardingStop={catchBusBoardingStop}
+        catchBusUserPosition={userPosition}
       />
 
       {/* ── Top bar ───────────────────────────────────────────────────────── */}
@@ -381,6 +424,23 @@ export default function Map() {
               className="w-full text-gray-400 hover:text-gray-600 text-sm py-2 transition-colors"
             >
               No por ahora
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Map pick mode banner ──────────────────────────────────────────── */}
+      {mapPickMode !== 'none' && (
+        <div className="absolute top-16 left-0 right-0 z-[1100] flex justify-center px-4 pointer-events-none">
+          <div className="bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-xl flex items-center gap-3 pointer-events-auto">
+            <span className="text-sm font-semibold">
+              📌 Toca el mapa para elegir tu {mapPickMode === 'dest' ? 'destino' : 'origen'}
+            </span>
+            <button
+              onClick={() => { setMapPickMode('none'); setSheetState('middle'); }}
+              className="text-blue-200 hover:text-white text-base leading-none"
+            >
+              ✕
             </button>
           </div>
         </div>

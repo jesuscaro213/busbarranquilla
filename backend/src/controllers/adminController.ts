@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import { scanBlog } from '../services/blogScraper';
 import { processImports } from '../services/routeProcessor';
+import { importTransmetro } from '../scripts/importTransmetro';
+import { importBuses } from '../scripts/importBuses';
 import { getIo } from '../config/socket';
 
 const VALID_ROLES = ['admin', 'premium', 'free'] as const;
@@ -373,6 +375,65 @@ export const deleteCompany = async (req: Request, res: Response): Promise<void> 
 
   } catch (error) {
     console.error('Error eliminando empresa:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// POST /api/admin/routes/import-transmetro — importar desde OSM vía Overpass
+export const importOSMTransmetro = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await importTransmetro();
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error importando Transmetro:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// POST /api/admin/routes/import-buses — importar buses urbanos desde OSM
+export const importOSMBuses = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await importBuses();
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error importando buses:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// GET /api/admin/transmetro — listar rutas Transmetro y alimentadoras
+export const listTransmetroRoutes = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.*, c.name AS company_name,
+              (SELECT COUNT(*) FROM stops WHERE route_id = r.id)::int AS stop_count
+       FROM routes r
+       LEFT JOIN companies c ON c.id = r.company_id
+       WHERE r.type IN ('transmetro', 'alimentadora')
+       ORDER BY r.type DESC, r.name ASC`
+    );
+    res.json({ routes: rows });
+  } catch (error) {
+    console.error('Error listando rutas Transmetro:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// GET /api/admin/buses — listar rutas de buses urbanos
+export const listBusRoutes = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.name, r.code, r.color, r.company, r.is_active,
+              c.name AS company_name,
+              (SELECT COUNT(*) FROM stops WHERE route_id = r.id)::int AS stop_count
+       FROM routes r
+       LEFT JOIN companies c ON c.id = r.company_id
+       WHERE r.type = 'bus'
+       ORDER BY c.name ASC, r.code ASC`
+    );
+    res.json({ routes: rows });
+  } catch (error) {
+    console.error('Error listando rutas de buses:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };

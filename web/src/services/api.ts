@@ -32,8 +32,8 @@ export const authApi = {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export const routesApi = {
-  list: () =>
-    api.get('/api/routes'),
+  list: (params?: { type?: string }) =>
+    api.get('/api/routes', { params }),
 
   getById: (id: number) =>
     api.get(`/api/routes/${id}`),
@@ -82,8 +82,8 @@ export const routesApi = {
   activeFeed: () =>
     api.get('/api/routes/active-feed'),
 
-  plan: (destLat: number, destLng: number) =>
-    api.get('/api/routes/plan', { params: { destLat, destLng } }),
+  plan: (destLat: number, destLng: number, originLat?: number, originLng?: number) =>
+    api.get('/api/routes/plan', { params: { destLat, destLng, originLat, originLng } }),
 
   toggleActive: (id: number) =>
     api.patch(`/api/routes/${id}/toggle`),
@@ -96,6 +96,18 @@ export const routesApi = {
 
   getPendingCount: () =>
     api.get('/api/admin/routes/pending-count'),
+
+  importTransmetro: () =>
+    api.post('/api/admin/routes/import-transmetro'),
+
+  importBuses: () =>
+    api.post('/api/admin/routes/import-buses'),
+
+  getTransmetroRoutes: () =>
+    api.get('/api/admin/transmetro'),
+
+  getBusRoutes: () =>
+    api.get('/api/admin/buses'),
 };
 
 // ─── Stops ───────────────────────────────────────────────────────────────────

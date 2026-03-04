@@ -8,8 +8,9 @@ import Register from './pages/Register';
 import Map from './pages/Map';
 import AdminLayout from './pages/admin/AdminLayout';
 import AdminUsers from './pages/admin/AdminUsers';
-import AdminRoutes from './pages/admin/AdminRoutes';
 import AdminCompanies from './pages/admin/AdminCompanies';
+import AdminTransmetro from './pages/admin/AdminTransmetro';
+import AdminBuses from './pages/admin/AdminBuses';
 
 function PublicLayout() {
   return <><Navbar /><Outlet /></>;
@@ -43,10 +44,11 @@ function AppRoutes() {
       {/* Layout admin — con AdminRoute guard + AdminLayout sidebar */}
       <Route element={<AdminRoute />}>
         <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
+          <Route path="/admin" element={<Navigate to="/admin/buses" replace />} />
           <Route path="/admin/users" element={<AdminUsers />} />
-          <Route path="/admin/routes" element={<AdminRoutes />} />
           <Route path="/admin/companies" element={<AdminCompanies />} />
+          <Route path="/admin/buses" element={<AdminBuses />} />
+          <Route path="/admin/transmetro" element={<AdminTransmetro />} />
         </Route>
       </Route>
     </Routes>

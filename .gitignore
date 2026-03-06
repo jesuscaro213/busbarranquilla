@@ -1,6 +1,10 @@
 # Variables de entorno
 .env
+.env.local
+.env.*.local
 backend/.env
+web/.env
+web/.env.local
 mobile/.env
 
 # Dependencias

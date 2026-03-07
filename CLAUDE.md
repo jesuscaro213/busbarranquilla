@@ -95,7 +95,7 @@ npm run web
 
 **Route geometry** — stored as JSONB in `routes.geometry`. On create/update, the backend calls OSRM (two-attempt strategy: full route first, then segment-by-segment with straight-line fallback). Geometry can be regenerated on demand via `POST /api/routes/:id/regenerate-geometry`. The `pg` library auto-parses JSONB to `[number, number][]` — no manual JSON.parse needed in frontend.
 
-**Socket.io** — configured in `config/socket.ts`. Real-time bus location tracking via `bus:location`, `bus:joined`, `bus:left`, `route:nearby` channels.
+**Socket.io** — configured in `config/socket.ts`. Real-time bus location tracking via `bus:location`, `bus:joined`, `bus:left`, `route:nearby` channels. Route-specific rooms (`route:{id}`) for real-time report events: clients emit `join:route` / `leave:route` when boarding/alighting, server emits `route:new_report` and `route:report_confirmed` to the room.
 
 **Seed** — `scripts/seedRoutes.ts` auto-runs on startup if `routes` table is empty. Seeds real Barranquilla bus routes with stops.
 
@@ -136,6 +136,12 @@ backend/src/
 └── scripts/
     └── seedRoutes.ts        # Barranquilla routes + stops seed data
 ```
+
+#### New API endpoints (added in Phase 3.5)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/reports/route/:routeId` | ✅ | Active reports for a route with `confirmed_by_me`, `is_valid`, `needed_confirmations` — only returns reports from other users |
 
 #### New API endpoints (added in Phase 2)
 
@@ -226,7 +232,7 @@ Active while a trip is running (`view === 'active'`). All monitors start on trip
 | `routesApi` | list, getById, search, nearby, create, update, delete, recommend, activeFeed, plan, regenerateGeometry |
 | `stopsApi` | listByRoute, add, delete, deleteByRoute |
 | `adminApi` | getCompanies |
-| `reportsApi` | getNearby, create, confirm, resolve |
+| `reportsApi` | getNearby, create, confirm, resolve, getOccupancy, getRouteReports |
 | `creditsApi` | getBalance, getHistory, spend |
 | `tripsApi` | getActive, getCurrent, getActiveBuses, start, updateLocation, end |
 | `usersApi` | getFavorites, addFavorite, removeFavorite |
@@ -282,7 +288,10 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 
 ### reports
 `id, user_id, route_id, type, latitude, longitude, description, is_active, confirmations, created_at, expires_at (NOW() + 30 min)`
-**Migrations added:** `report_lat DECIMAL(10,8)`, `report_lng DECIMAL(11,8)`, `resolved_at TIMESTAMPTZ DEFAULT NULL`
+**Migrations added:** `report_lat DECIMAL(10,8)`, `report_lng DECIMAL(11,8)`, `resolved_at TIMESTAMPTZ DEFAULT NULL`, `credits_awarded_to_reporter BOOLEAN DEFAULT FALSE`
+
+### report_confirmations
+`id, report_id (→ reports), user_id (→ users), created_at` — `UNIQUE(report_id, user_id)`
 
 ### credit_transactions
 `id, user_id, amount, type, description, created_at`
@@ -297,12 +306,16 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 
 ## WebSocket Channels
 
-| Channel | Description |
-|---------|-------------|
-| `bus:location` | Transmits active bus locations |
-| `bus:joined` | User boarded a bus |
-| `bus:left` | User got off a bus |
-| `route:nearby` | Nearby routes for a location |
+| Channel | Direction | Description |
+|---------|-----------|-------------|
+| `bus:location` | server → all | Transmits active bus locations |
+| `bus:joined` | server → all | User boarded a bus |
+| `bus:left` | server → all | User got off a bus |
+| `route:nearby` | server → all | Nearby routes for a location |
+| `join:route` | client → server | Join route room when trip starts |
+| `leave:route` | client → server | Leave route room when trip ends |
+| `route:new_report` | server → room | New report created on the route |
+| `route:report_confirmed` | server → room | Report confirmation count updated |
 
 ---
 
@@ -353,18 +366,23 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Credit packages: 100/$1,900 | 300/$4,900 | 700/$9,900 | 1,500/$17,900 COP.
 
 ### Credits earned
-| Action | Credits |
-|--------|---------|
-| Report bus location | +5 |
-| Report traffic jam | +4 |
-| Report bus full/empty | +3 |
-| Confirm another user's report | +2 |
-| Report no service | +4 |
-| Invite a friend | +25 |
-| 7-day reporting streak | +30 |
-| Welcome bonus (registration) | +50 |
-| Per minute transmitting bus location | +1 |
-| Complete full trip | +10 |
+| Action | Credits | Notes |
+|--------|---------|-------|
+| Report (outside active trip) | +3–5 | Immediate, per `CREDITS_BY_TYPE` |
+| Report during trip, alone on bus | +1 | Immediate |
+| Report during trip, others on bus | 0 → +2 | +2 when report reaches 50%+ confirmations; +1 auto on trip end if no confirmation |
+| Confirm another user's report | +1 | Max 3 per trip; confirmer must have active trip on same route |
+| Report no service | +4 | |
+| Invite a friend | +25 | |
+| 7-day reporting streak | +30 | |
+| Welcome bonus (registration) | +50 | |
+| Per minute transmitting bus location | +1 | |
+| Complete full trip | +10 | |
+
+**Occupancy report rules:**
+- Only two states: `lleno` (🔴 Bus lleno) and `bus_disponible` (🟢 Hay sillas)
+- Per occupancy type, only the first report per trip earns credits (tracked via `occupancyCreditedRef` in frontend + `credit_transactions` check in backend)
+- 10-minute cooldown between occupancy reports on the same route
 
 ### Credits spent
 | Feature | Cost |
@@ -430,6 +448,17 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Connect mibus.co domain (Vercel → mibus.co, Railway → api.mibus.co)
 - Wompi payments integration
 - Active premium plans
+
+### Phase 3.5 ✅ Complete
+**Smart report confirmation system:**
+- Removed `casi_lleno` — occupancy is now binary: `lleno` / `bus_disponible` (both worth +3 outside trips)
+- Deferred credit system for trip reports: +1 if alone, 0 if others present (waits for confirmations)
+- Confirmation system: confirmer earns +1 (max 3/trip), reporter earns +2 when 50%+ of other passengers confirm
+- Report validity: `activeUsers <= 1` → always valid; `activeUsers >= 2` → needs `ceil((activeUsers-1) × 0.5)` confirmations
+- Auto-award: reporter gets +1 on trip end for any report that never got confirmed
+- Real-time via Socket.io rooms (`route:{id}`): new reports and confirmations appear instantly to all passengers on the same bus
+- New table: `report_confirmations` — prevents double confirmation per user per report
+- New column: `reports.credits_awarded_to_reporter` — prevents double payment to reporter
 
 ### Phase 4 — Future
 - React Native mobile app

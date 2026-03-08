@@ -14,6 +14,7 @@ interface WompiSignature {
 
 interface WompiWebhookBody {
   event?: string;
+  timestamp?: number;
   data?: {
     transaction?: {
       id?: string;
@@ -79,13 +80,15 @@ const verifyWebhookSignature = (body: WompiWebhookBody): boolean => {
     return false;
   }
 
-  const payload = signature.properties
-    .map((propertyPath) => getValueByPath(body, propertyPath))
+  // Properties son rutas relativas a body.data (ej: "transaction.id" → body.data.transaction.id)
+  const propertyValues = signature.properties
+    .map((propertyPath) => getValueByPath(body.data, propertyPath))
     .join('');
 
+  // Wompi: SHA256(values + timestamp + secret)
   const computed = crypto
     .createHash('sha256')
-    .update(payload + eventSecret)
+    .update(propertyValues + (body.timestamp ?? '') + eventSecret)
     .digest('hex');
 
   return computed.toLowerCase() === signature.checksum.toLowerCase();

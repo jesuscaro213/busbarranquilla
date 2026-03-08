@@ -6,6 +6,18 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom']
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-map': ['leaflet', 'react-leaflet'],
+          'vendor-socket': ['socket.io-client'],
+          'vendor-axios': ['axios'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     host: true,

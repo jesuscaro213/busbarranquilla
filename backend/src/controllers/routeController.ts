@@ -377,7 +377,7 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
               cos(radians($3)) * cos(radians(s.latitude)) *
               cos(radians(s.longitude) - radians($4)) +
               sin(radians($3)) * sin(radians(s.latitude))
-            ))) <= 0.6
+            ))) <= 1.0
           ORDER BY s.route_id,
             (6371 * acos(LEAST(1.0, cos(radians($3)) * cos(radians(s.latitude)) *
               cos(radians(s.longitude) - radians($4)) +
@@ -400,7 +400,6 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
           FROM stops s
           JOIN routes r ON r.id = s.route_id AND r.is_active = true
           JOIN origin_stops os ON os.route_id = s.route_id AND s.stop_order > os.origin_order
-          WHERE s.leg = 'ida'
           ORDER BY s.route_id,
             (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
               cos(radians(s.longitude) - radians($2)) +

@@ -205,8 +205,8 @@ export const tripsApi = {
   updateLocation: (data: { latitude: number; longitude: number }) =>
     api.post('/api/trips/location', data),
 
-  end: () =>
-    api.post('/api/trips/end'),
+  end: (data?: { suspicious_minutes?: number }) =>
+    api.post('/api/trips/end', data ?? {}),
 };
 
 // ─── Users / Favorites ───────────────────────────────────────────────────────

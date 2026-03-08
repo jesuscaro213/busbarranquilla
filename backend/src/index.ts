@@ -25,6 +25,8 @@ const httpServer = createServer(app);
 // Middlewares — SIEMPRE primero
 app.use(cors());
 app.use(express.json());
+// Acepta body text/plain (usado por navigator.sendBeacon desde el frontend)
+app.use(express.text({ type: 'text/plain' }));
 
 // Rutas
 app.use('/api/auth', authRoutes);

@@ -72,17 +72,24 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
 
     const trip = tripResult.rows[0];
 
-    // Determinar si se otorga +1 crédito por minuto
-    const shouldAwardCredit =
+    // Verificar si hay trancón activo en la ruta → crédito cada 2 min en vez de 1 min
+    let creditThresholdMs = 60000;
+    if (trip.route_id) {
+      const tranconRes = await pool.query(
+        `SELECT id FROM reports WHERE route_id = $1 AND type = 'trancon'
+         AND is_active = true AND expires_at > NOW() LIMIT 1`,
+        [trip.route_id]
+      );
+      if (tranconRes.rows.length > 0) creditThresholdMs = 120000;
+    }
+
+    // Acumular crédito pendiente (NO se transfiere al balance hasta endTrip)
+    const shouldAccumulate =
       trip.last_location_at === null ||
-      new Date().getTime() - new Date(trip.last_location_at).getTime() >= 60000;
+      new Date().getTime() - new Date(trip.last_location_at).getTime() >= creditThresholdMs;
 
     let creditsEarned = trip.credits_earned;
-
-    if (shouldAwardCredit) {
-      await awardCredits(userId, 1, 'earn', 'Transmisión de ubicación en bus');
-      creditsEarned += 1;
-    }
+    if (shouldAccumulate) creditsEarned += 1;
 
     const updated = await pool.query(
       `UPDATE active_trips
@@ -103,8 +110,7 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
     });
 
     res.json({
-      credited: shouldAwardCredit,
-      creditsEarned: updated.rows[0].credits_earned,
+      credits_pending: updated.rows[0].credits_earned,
     });
 
   } catch (error) {
@@ -116,6 +122,8 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
 // Finalizar viaje (Me bajé)
 export const endTrip = async (req: Request, res: Response): Promise<void> => {
   const userId = (req as any).userId;
+  const bodyData = typeof req.body === 'string' ? {} : (req.body ?? {});
+  const suspiciousMinutes: number = bodyData?.suspicious_minutes ?? 0;
 
   try {
     const tripResult = await pool.query(
@@ -130,7 +138,10 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
 
     const trip = tripResult.rows[0];
 
-    // Auto-award +1 por reportes que no recibieron confirmación durante el viaje
+    // Descontar minutos sospechosos del acumulado (mínimo 0)
+    const finalCredits = Math.max(0, trip.credits_earned - suspiciousMinutes);
+
+    // Auto-award +1 por reportes sin confirmación durante el viaje
     const uncreditedRes = await pool.query(
       `SELECT id FROM reports
        WHERE user_id = $1 AND credits_awarded_to_reporter = false
@@ -145,14 +156,21 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
       );
     }
 
+    // Transferir créditos pendientes acumulados al balance del usuario
+    if (finalCredits > 0) {
+      await awardCredits(userId, finalCredits, 'earn', 'Créditos por transmitir ubicación en bus');
+    }
+
     await awardCredits(userId, 10, 'earn', 'Viaje completado');
+
+    const totalEarned = finalCredits + 10 + uncreditedRes.rows.length;
 
     const updated = await pool.query(
       `UPDATE active_trips
-       SET is_active = false, ended_at = NOW(), credits_earned = credits_earned + 10
+       SET is_active = false, ended_at = NOW(), credits_earned = $2
        WHERE id = $1
        RETURNING *`,
-      [trip.id]
+      [trip.id, totalEarned]
     );
 
     getIo().emit('bus:left', {

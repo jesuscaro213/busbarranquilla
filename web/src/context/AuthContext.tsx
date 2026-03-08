@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { authApi } from '../services/api';
+import { authApi, tripsApi } from '../services/api';
 
 interface User {
   id: number;
@@ -19,7 +19,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, phone?: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -61,7 +61,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(userData);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      const current = await tripsApi.getCurrent();
+      if (current.data.trip) {
+        await tripsApi.end();
+      }
+    } catch { /* ignore — best effort */ }
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);

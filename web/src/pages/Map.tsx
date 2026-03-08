@@ -87,6 +87,8 @@ export default function Map() {
 
   // Route ID to auto-board from planner
   const [pendingBoardRouteId, setPendingBoardRouteId] = useState<number | undefined>(undefined);
+  // Incrementar este key fuerza remount de CatchBusMode (limpia selección al volver)
+  const [catchBusModeKey, setCatchBusModeKey] = useState(0);
 
   // Plan mode map state
   const [planOrigin, setPlanOrigin] = useState<{ lat: number; lng: number } | null>(null);
@@ -395,6 +397,8 @@ export default function Map() {
                   setActiveTripGeometry(null);
                   setCatchBusBoardingStop(null);
                   setClickedPos(null);
+                  setPendingBoardRouteId(undefined);
+                  setCatchBusModeKey((k) => k + 1);
                 }}
                 className="text-gray-400 hover:text-gray-700 text-sm flex items-center gap-1 mb-1"
               >
@@ -402,6 +406,7 @@ export default function Map() {
               </button>
             )}
             <CatchBusMode
+              key={catchBusModeKey}
               userPosition={userPosition}
               onTripChange={setIsOnTrip}
               onRouteGeometry={setActiveTripGeometry}
@@ -411,6 +416,7 @@ export default function Map() {
                 setSheetMode('feed');
                 setActiveTripGeometry(null);
                 setCatchBusBoardingStop(null);
+                setCatchBusModeKey((k) => k + 1);
               }}
             />
           </div>
@@ -454,6 +460,7 @@ export default function Map() {
               }}
               onBoardRoute={(routeId) => {
                 setPendingBoardRouteId(routeId);
+                setCatchBusModeKey((k) => k + 1);
                 setSheetMode('trip');
                 setSheetState('middle');
               }}

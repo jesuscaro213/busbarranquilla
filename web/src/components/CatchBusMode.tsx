@@ -155,6 +155,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   const [flashedBtn, setFlashedBtn] = useState<ReportType | null>(null);
   const [deviationAlert, setDeviationAlert] = useState(false);
   const [inactiveAlert, setInactiveAlert] = useState(false);
+  const [suspiciousAlert, setSuspiciousAlert] = useState(false);
   const [dropoffPrompt, setDropoffPrompt] = useState(false);
   const [dropoffBanner, setDropoffBanner] = useState<'prepare' | 'now' | 'missed' | null>(null);
 
@@ -190,6 +191,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   const lastPositionRef = useRef<{ lat: number; lng: number; timestamp: number } | null>(null);
   const inactiveSecondsRef = useRef<number>(0);
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasBeenWarnedRef = useRef<boolean>(false); // ya mostró la alerta de inactividad una vez
   const monitor4Ref = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertActivatedRef = useRef<boolean>(false);
   const alertDeclinedRef = useRef<boolean>(false);
@@ -198,6 +200,16 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockIntervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const gpsCheckRef         = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── beforeunload: cerrar viaje si usuario cierra la pestaña ───────────
+  useEffect(() => {
+    if (!activeTrip) return;
+    const handler = () => {
+      navigator.sendBeacon('/api/trips/end', JSON.stringify({}));
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [activeTrip?.id]); // solo re-registrar si cambia el ID del viaje, no en cada update de créditos
 
   // ── Emitir geometry de la ruta activa al mapa ──────────────────────────
   useEffect(() => {
@@ -347,69 +359,69 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     };
   }, [activeTrip]);
 
-  // ── Monitor 3: auto-cierre si sin movimiento por 10 min ───────────────
+  // ── Monitor 3: inactividad — 10 min → aviso, 30 min → alerta sospechosa ──
   useEffect(() => {
     if (!activeTrip) return;
 
     lastPositionRef.current = null;
     inactiveSecondsRef.current = 0;
 
+    const doAutoClose = (suspicious: boolean) => {
+      if (autoCloseTimerRef.current) return;
+      autoCloseTimerRef.current = setTimeout(() => {
+        autoCloseTimerRef.current = null;
+        tripsApi.end(suspicious ? { suspicious_minutes: 30 } : undefined)
+          .catch(() => {})
+          .finally(() => {
+            setSummaryData((prev) => prev
+              ? { ...prev, note: suspicious ? 'Viaje cerrado — inactividad prolongada' : 'Viaje cerrado automáticamente' }
+              : { routeName: '', routeCode: '', elapsedSecs: inactiveSecondsRef.current, credits: 0,
+                  note: suspicious ? 'Viaje cerrado — inactividad prolongada' : 'Viaje cerrado automáticamente' }
+            );
+            setInactiveAlert(false);
+            setSuspiciousAlert(false);
+            setActiveTrip(null);
+            onTripChange(false);
+            setView('summary');
+          });
+      }, 120000);
+    };
+
     monitor3Ref.current = setInterval(() => {
       const pos = userPositionRef.current;
       if (!pos) return;
 
       if (lastPositionRef.current) {
-        const dist = haversineMeters(
-          lastPositionRef.current.lat,
-          lastPositionRef.current.lng,
-          pos[0],
-          pos[1],
-        );
+        const dist = haversineMeters(lastPositionRef.current.lat, lastPositionRef.current.lng, pos[0], pos[1]);
         if (dist < 50) {
           inactiveSecondsRef.current += 60;
         } else {
           inactiveSecondsRef.current = 0;
         }
       }
-
       lastPositionRef.current = { lat: pos[0], lng: pos[1], timestamp: Date.now() };
 
-      if (inactiveSecondsRef.current >= 600) {
-        setInactiveAlert(true);
-        if (!autoCloseTimerRef.current) {
-          autoCloseTimerRef.current = setTimeout(() => {
-            autoCloseTimerRef.current = null;
-            // Auto-close: end trip silently with note
-            tripsApi.end().catch(() => {}).finally(() => {
-              setSummaryData((prev) => prev
-                ? { ...prev, note: 'Viaje cerrado automáticamente' }
-                : {
-                    routeName: '',
-                    routeCode: '',
-                    elapsedSecs: inactiveSecondsRef.current,
-                    credits: 0,
-                    note: 'Viaje cerrado automáticamente',
-                  }
-              );
-              setInactiveAlert(false);
-              setActiveTrip(null);
-              onTripChange(false);
-              setView('summary');
-            });
-          }, 120000);
+      if (inactiveSecondsRef.current >= 1800) {
+        // 30 min sin moverse → alerta sospechosa
+        setInactiveAlert(false);
+        setSuspiciousAlert(true);
+        doAutoClose(true);
+      } else if (inactiveSecondsRef.current >= 600) {
+        if (hasBeenWarnedRef.current) {
+          // Segunda vez sin moverse → alerta sospechosa
+          setInactiveAlert(false);
+          setSuspiciousAlert(true);
+          doAutoClose(true);
+        } else {
+          setInactiveAlert(true);
+          doAutoClose(false);
         }
       }
     }, 60000);
 
     return () => {
-      if (monitor3Ref.current) {
-        clearInterval(monitor3Ref.current);
-        monitor3Ref.current = null;
-      }
-      if (autoCloseTimerRef.current) {
-        clearTimeout(autoCloseTimerRef.current);
-        autoCloseTimerRef.current = null;
-      }
+      if (monitor3Ref.current) { clearInterval(monitor3Ref.current); monitor3Ref.current = null; }
+      if (autoCloseTimerRef.current) { clearTimeout(autoCloseTimerRef.current); autoCloseTimerRef.current = null; }
     };
   }, [activeTrip]);
 
@@ -431,16 +443,49 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     const destLat = activeTrip.destination_lat;
     const destLng = activeTrip.destination_lng;
 
+    // Índice de la parada destino dentro del recorrido
+    const destIdx = routeStopsRef.current.findIndex(
+      (s) => haversineMeters(s.lat, s.lng, destLat, destLng) < 80
+    );
+
     monitor4Ref.current = setInterval(() => {
       if (!alertActivatedRef.current) return;
       const pos = userPositionRef.current;
       if (!pos) return;
 
-      const dist = haversineMeters(pos[0], pos[1], destLat, destLng);
+      const stops = routeStopsRef.current;
+
+      // Calcular distancia a lo largo de la ruta si tenemos paradas y destino indexado
+      let dist: number;
+      if (stops.length > 1 && destIdx !== -1) {
+        // Parada más cercana al usuario = posición actual en la ruta
+        let nearestIdx = 0;
+        let nearestDist = Infinity;
+        for (let i = 0; i <= destIdx; i++) {
+          const d = haversineMeters(pos[0], pos[1], stops[i].lat, stops[i].lng);
+          if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+        }
+
+        if (nearestIdx >= destIdx) {
+          // Ya pasó la parada destino
+          setDropoffBanner('missed');
+          prevDistToDestRef.current = 0;
+          return;
+        }
+
+        // Distancia acumulada: usuario → parada cercana → ... → destino
+        dist = nearestDist;
+        for (let i = nearestIdx; i < destIdx; i++) {
+          dist += haversineMeters(stops[i].lat, stops[i].lng, stops[i + 1].lat, stops[i + 1].lng);
+        }
+      } else {
+        // Fallback: línea recta
+        dist = haversineMeters(pos[0], pos[1], destLat, destLng);
+      }
+
       const prev = prevDistToDestRef.current;
 
       if (prev !== null && prev <= 200 && dist > 200) {
-        // Pasó la parada
         setDropoffBanner('missed');
       } else if (dist <= 200) {
         setDropoffBanner('now');
@@ -483,7 +528,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       const pos = userPositionRef.current;
       if (!pos) return;
       tripsApi.updateLocation({ latitude: pos[0], longitude: pos[1] })
-        .then((r) => { if (r.data.credited) setCreditsThisTrip(r.data.creditsEarned); })
+        .then((r) => { if (r.data.credits_pending !== undefined) setCreditsThisTrip(r.data.credits_pending); })
         .catch(() => {});
     }, 30000);
 
@@ -664,6 +709,8 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       setCreditsThisTrip(0);
       setElapsed(0);
       occupancyCreditedRef.current = new Set();
+      hasBeenWarnedRef.current = false;
+      setSuspiciousAlert(false);
       onTripChange(true);
       onRouteGeometry?.(selectedRoute?.geometry ?? null);
       onBoardingStop?.(null);
@@ -682,10 +729,10 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   };
 
   // ── Trip end ──────────────────────────────────────────────────────────
-  const handleEnd = async () => {
+  const handleEnd = async (suspiciousMinutes?: number) => {
     setTripLoading(true);
     try {
-      const res = await tripsApi.end();
+      const res = await tripsApi.end(suspiciousMinutes ? { suspicious_minutes: suspiciousMinutes } : undefined);
       setSummaryData({
         routeName: activeTrip?.route_name ?? 'Bus',
         routeCode: activeTrip?.route_code ?? '',
@@ -700,6 +747,8 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       if (monitor4Ref.current) { clearInterval(monitor4Ref.current); monitor4Ref.current = null; }
       setDeviationAlert(false);
       setInactiveAlert(false);
+      setSuspiciousAlert(false);
+      hasBeenWarnedRef.current = false;
       setDropoffPrompt(false);
       setDropoffBanner(null);
       setShowEndConfirm(false);
@@ -1174,6 +1223,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
                 <button
                   onClick={() => {
                     inactiveSecondsRef.current = 0;
+                    hasBeenWarnedRef.current = true;
                     setInactiveAlert(false);
                     if (autoCloseTimerRef.current) {
                       clearTimeout(autoCloseTimerRef.current);
@@ -1202,6 +1252,47 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
           </div>
         )}
 
+        {/* Suspicious inactivity alert modal */}
+        {suspiciousAlert && (
+          <div className="fixed inset-0 z-[2200] bg-black/60 flex items-end justify-center px-4 pb-6">
+            <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+              <p className="text-2xl text-center">⚠️</p>
+              <p className="font-semibold text-gray-900 text-center">Llevas 30 minutos sin moverte</p>
+              <p className="text-sm text-gray-500 text-center">
+                ¿Qué está pasando? Si ya te bajaste del bus se descontarán 30 minutos del bonus acumulado.
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    inactiveSecondsRef.current = 0;
+                    setSuspiciousAlert(false);
+                    if (autoCloseTimerRef.current) {
+                      clearTimeout(autoCloseTimerRef.current);
+                      autoCloseTimerRef.current = null;
+                    }
+                  }}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  🚦 Estoy en un trancón
+                </button>
+                <button
+                  onClick={() => {
+                    setSuspiciousAlert(false);
+                    if (autoCloseTimerRef.current) {
+                      clearTimeout(autoCloseTimerRef.current);
+                      autoCloseTimerRef.current = null;
+                    }
+                    handleEnd(30);
+                  }}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  🛑 Ya me bajé — Finalizar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* End confirm modal */}
         {showEndConfirm && (
           <div className="fixed inset-0 z-[2000] bg-black/50 flex items-end justify-center px-4 pb-6">
@@ -1215,7 +1306,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
                   No, sigo en el bus
                 </button>
                 <button
-                  onClick={handleEnd}
+                  onClick={() => handleEnd()}
                   disabled={tripLoading}
                   className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
                 >

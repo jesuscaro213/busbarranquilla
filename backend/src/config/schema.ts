@@ -221,6 +221,21 @@ const createTables = async () => {
     `);
     console.log('✅ Columnas turnaround_idx en routes y leg en stops');
 
+    // Cerrar viajes zombie (activos por más de 4 horas sin actualización de ubicación)
+    const zombieClosed = await pool.query(`
+      UPDATE active_trips
+      SET is_active = false, ended_at = NOW()
+      WHERE is_active = true
+        AND (
+          last_location_at < NOW() - INTERVAL '4 hours'
+          OR (last_location_at IS NULL AND started_at < NOW() - INTERVAL '4 hours')
+        )
+      RETURNING id
+    `);
+    if (zombieClosed.rowCount && zombieClosed.rowCount > 0) {
+      console.log(`🧹 ${zombieClosed.rowCount} viaje(s) zombie cerrados automáticamente`);
+    }
+
     // Seed automático de usuario admin (debe correr después de todas las migraciones)
     const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
     if (adminCheck.rows.length === 0) {

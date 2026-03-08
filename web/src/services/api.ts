@@ -187,6 +187,16 @@ export const creditsApi = {
     api.post('/api/credits/spend', data),
 };
 
+// ─── Payments ────────────────────────────────────────────────────────────────
+
+export const paymentsApi = {
+  getPlans: () =>
+    api.get('/api/payments/plans'),
+
+  createCheckout: (plan: 'monthly' | 'yearly') =>
+    api.post('/api/payments/checkout', { plan }),
+};
+
 // ─── Trips ───────────────────────────────────────────────────────────────────
 
 export const tripsApi = {

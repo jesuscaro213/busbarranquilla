@@ -16,6 +16,7 @@ import adminRoutes from './routes/adminRoutes';
 import userRoutes from './routes/userRoutes';
 import traceRoutes from './routes/traceRoutes';
 import suggestionRoutes from './routes/suggestionRoutes';
+import paymentRoutes from './routes/paymentRoutes';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/traces', traceRoutes);
 app.use('/api/suggestions', suggestionRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

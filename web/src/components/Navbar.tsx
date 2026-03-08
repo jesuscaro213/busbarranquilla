@@ -6,9 +6,11 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isPremium = Boolean(user && (user.is_premium || user.role === 'premium'));
+  const showPremiumLink = Boolean(user && user.role !== 'premium' && user.role !== 'admin');
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
     setMenuOpen(false);
   };
@@ -30,15 +32,18 @@ export default function Navbar() {
             <>
               <Link to="/" className="hover:text-blue-300 transition-colors">Inicio</Link>
               <Link to="/map" className="hover:text-blue-300 transition-colors">Mapa</Link>
+              {showPremiumLink && (
+                <Link to="/premium" className="hover:text-blue-300 transition-colors">⚡ Premium</Link>
+              )}
               <div className="flex items-center gap-1 bg-blue-800 rounded-full px-3 py-1">
                 <span className="text-yellow-400">★</span>
                 <span className="font-semibold">{user.credits}</span>
                 <span className="text-blue-300 text-xs">créditos</span>
               </div>
-              {user.is_premium && (
-                <span className="bg-yellow-500 text-yellow-900 text-xs font-bold px-2 py-0.5 rounded-full">
-                  PREMIUM
-                </span>
+              {isPremium && (
+                <Link to="/premium" className="bg-emerald-500 text-emerald-950 text-xs font-bold px-2 py-0.5 rounded-full">
+                  ✓ Premium
+                </Link>
               )}
               {user.role === 'admin' && (
                 <Link to="/admin" className="hover:text-blue-300 transition-colors">
@@ -110,6 +115,16 @@ export default function Navbar() {
               <Link to="/map" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">
                 Mapa
               </Link>
+              {showPremiumLink && (
+                <Link to="/premium" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">
+                  ⚡ Premium
+                </Link>
+              )}
+              {isPremium && (
+                <Link to="/premium" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm text-emerald-300 hover:text-emerald-200 transition-colors">
+                  ✓ Premium
+                </Link>
+              )}
               {user.role === 'admin' && (
                 <Link to="/admin" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">
                   ⚙️ Administración

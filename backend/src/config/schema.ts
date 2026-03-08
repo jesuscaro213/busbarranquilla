@@ -221,6 +221,24 @@ const createTables = async () => {
     `);
     console.log('✅ Columnas turnaround_idx en routes y leg en stops');
 
+    // Tabla de pagos Wompi
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        wompi_reference VARCHAR(100) UNIQUE NOT NULL,
+        wompi_transaction_id VARCHAR(100),
+        plan VARCHAR(20) NOT NULL CHECK (plan IN ('monthly', 'yearly')),
+        amount_cents INTEGER NOT NULL,
+        currency VARCHAR(10) NOT NULL DEFAULT 'COP',
+        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'approved', 'declined', 'voided', 'error')),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla payments creada');
+
     // Cerrar viajes zombie (activos por más de 4 horas sin actualización de ubicación)
     const zombieClosed = await pool.query(`
       UPDATE active_trips

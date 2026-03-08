@@ -32,6 +32,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-busadmin}:${POSTGRES_PASSWORD:-busbarranquilla123}@postgres:5432/${POSTGRES_DB:-busbarranquilla}
       JWT_SECRET: ${JWT_SECRET:-busbarranquilla_secret_key_2024}
       REDIS_URL: redis://redis:6379
+      WOMPI_PUBLIC_KEY: ${WOMPI_PUBLIC_KEY:-pub_test_sKAvgbO6Oqpj2fHUHYESkub82tj7fdwp}
+      WOMPI_PRIVATE_KEY: ${WOMPI_PRIVATE_KEY:-prv_test_TVTQPaoE7Vse3lyPS8ZAEWOAzPIRZjfD}
+      WOMPI_EVENT_SECRET: ${WOMPI_EVENT_SECRET:-test_events_Uf6Kl5MqSaU85sk5oi2Cg0SCfqVNcJhH}
+      APP_URL: ${APP_URL:-http://localhost:5173}
     ports:
       - "3000:3000"
     command: npm run dev

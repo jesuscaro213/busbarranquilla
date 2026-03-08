@@ -6,6 +6,8 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Map from './pages/Map';
+import PremiumPage from './pages/PremiumPage';
+import PaymentResultPage from './pages/PaymentResultPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminCompanies from './pages/admin/AdminCompanies';
@@ -36,6 +38,8 @@ function AppRoutes() {
       <Route element={<PublicLayout />}>
         <Route path="/" element={<Home />} />
         <Route path="/map" element={<Map />} />
+        <Route path="/premium" element={<PremiumPage />} />
+        <Route path="/payment/result" element={<PaymentResultPage />} />
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
         <Route path="*" element={<Navigate to="/" replace />} />

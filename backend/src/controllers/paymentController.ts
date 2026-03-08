@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { awardCredits } from './creditController';
 
-type PlanId = 'monthly' | 'yearly';
+type PlanId = 'monthly';
 type PaymentStatus = 'pending' | 'approved' | 'declined' | 'voided' | 'error';
 
 interface WompiSignature {
@@ -32,11 +32,6 @@ const PLANS: Record<PlanId, { amountInCents: number; durationDays: number; label
     amountInCents: 490000,
     durationDays: 30,
     label: 'mensual',
-  },
-  yearly: {
-    amountInCents: 3990000,
-    durationDays: 365,
-    label: 'anual',
   },
 };
 
@@ -104,13 +99,6 @@ export const getPlans = async (_req: Request, res: Response): Promise<void> => {
         price_cop: 4900,
         duration_days: 30,
         features: ['Sin anuncios', 'Alertas de bajada gratis', 'Acceso prioritario'],
-      },
-      {
-        id: 'yearly',
-        name: 'Anual',
-        price_cop: 39900,
-        duration_days: 365,
-        features: ['Todo lo de Mensual', '2 meses gratis', 'Soporte prioritario'],
       },
     ],
   });

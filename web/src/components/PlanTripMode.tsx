@@ -50,7 +50,7 @@ interface Props {
     routeStops: StopForMap[];
     dropoffStop: { latitude: number; longitude: number; name: string } | null;
   }) => void;
-  onBoardRoute?: (routeId: number) => void;
+  onBoardRoute?: (routeId: number, destinationStopId?: number) => void;
 }
 
 // Reverse geocode a coordinate to a human-readable label
@@ -246,6 +246,7 @@ export default function PlanTripMode({
   const [results, setResults] = useState<PlanRoute[]>([]);
   const [planLoading, setPlanLoading] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<PlanRoute | null>(null);
+  const [selectedDropoffStopId, setSelectedDropoffStopId] = useState<number | undefined>(undefined);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [searchError, setSearchError] = useState('');
   const [nearbyRoutes, setNearbyRoutes] = useState<NearbyRoute[]>([]);
@@ -508,6 +509,7 @@ export default function PlanTripMode({
   // ── Select a result → update map ──────────────────────────────────────
   const handleSelectRoute = async (route: PlanRoute) => {
     setSelectedRoute(route);
+    setSelectedDropoffStopId(undefined);
 
     let routeStops: StopForMap[] = [
       { latitude: route.nearest_stop_lat, longitude: route.nearest_stop_lng },
@@ -519,7 +521,7 @@ export default function PlanTripMode({
         stopsApi.listByRoute(route.id),
       ]);
       const fullRoute = routeRes.data.route as { geometry?: [number, number][] | null };
-      const stops = (stopsRes.data.stops as { latitude: number; longitude: number; stop_order: number }[])
+      const stops = (stopsRes.data.stops as { id: number; latitude: number; longitude: number; stop_order: number }[])
         .sort((a, b) => a.stop_order - b.stop_order);
 
       if (stops.length >= 2) {
@@ -529,6 +531,7 @@ export default function PlanTripMode({
           const db = (best.latitude - route.nearest_stop_lat) ** 2 + (best.longitude - route.nearest_stop_lng) ** 2;
           return d < db ? s : best;
         });
+        setSelectedDropoffStopId(dropoffStop.id);
 
         // Find the boarding stop by matching origin, or use the first stop
         const boardingStop = origin
@@ -669,7 +672,7 @@ export default function PlanTripMode({
 
         {onBoardRoute && (
           <button
-            onClick={() => onBoardRoute(selectedRoute.id)}
+            onClick={() => onBoardRoute(selectedRoute.id, selectedDropoffStopId)}
             className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
           >
             🚌 Me subí a este bus

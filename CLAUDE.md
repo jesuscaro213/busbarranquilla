@@ -222,7 +222,7 @@ Active while a trip is running (`view === 'active'`). All monitors start on trip
 | 1 — Auto-resolve trancón | 120 s | Bus moved > 200 m from report location | `PATCH /api/reports/:id/resolve`, clear ref |
 | 2 — Desvío detection | 30 s | Off all route stops > 250 m for ≥ 90 s | Banner with 3 options: report, get off, ignore 5 min |
 | 3 — Auto-cierre inactividad | 60 s | Movement < 50 m for ≥ 600 s | Modal "¿Sigues en el bus?"; auto-close after 120 s |
-| 4 — Alertas de bajada | 15 s | Destination set; premium/admin auto-activate, free pays 12 cr | Prepare (400 m), Now (200 m + vibrate), Missed banners |
+| 4 — Alertas de bajada | 15 s | Destination set; premium/admin auto-activate, free pays 5 cr | Prepare (400 m), Now (200 m + vibrate), Missed banners |
 
 #### `api.ts` modules
 
@@ -350,7 +350,7 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Option to rate the trip
 
 ### 5. Drop-off alerts (Monitor 4)
-- Auto-activated for premium/admin; costs 12 credits for free users
+- Auto-activated for premium/admin; costs 5 credits for free users
 - Prepare banner at 400 m from destination
 - "Bájate ya" alert + vibration at 200 m
 - Missed alert if bus passes destination
@@ -385,14 +385,9 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - 10-minute cooldown between occupancy reports on the same route
 
 ### Credits spent
-| Feature | Cost |
-|---------|------|
-| Which bus serves me? | 8 |
-| See bus in real time | 10 |
-| Arrival alert | 10 |
-| Stop drop-off alert | 12 |
-| See if bus is full | 5 |
-| Alternate route (traffic) | 8 |
+| Feature | Cost | Notes |
+|---------|------|-------|
+| Stop drop-off alert | 5 | Auto-free for premium/admin; free users pay per trip |
 
 ---
 

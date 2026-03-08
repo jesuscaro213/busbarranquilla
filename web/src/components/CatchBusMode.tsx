@@ -49,6 +49,7 @@ interface Props {
   onRouteGeometry?: (geom: [number, number][] | null) => void;
   onBoardingStop?: (stop: { latitude: number; longitude: number; name: string } | null) => void;
   initialRouteId?: number;
+  initialDestinationStopId?: number;
   onTripEnd?: () => void;
 }
 
@@ -122,7 +123,7 @@ function fmtTime(secs: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry, onBoardingStop, initialRouteId, onTripEnd }: Props) {
+export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry, onBoardingStop, initialRouteId, initialDestinationStopId, onTripEnd }: Props) {
   const { user } = useAuth();
 
   // Route list
@@ -443,17 +444,17 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     const destLat = activeTrip.destination_lat;
     const destLng = activeTrip.destination_lng;
 
-    // Índice de la parada destino dentro del recorrido
-    const destIdx = routeStopsRef.current.findIndex(
-      (s) => haversineMeters(s.lat, s.lng, destLat, destLng) < 80
-    );
-
     monitor4Ref.current = setInterval(() => {
       if (!alertActivatedRef.current) return;
       const pos = userPositionRef.current;
       if (!pos) return;
 
       const stops = routeStopsRef.current;
+
+      // Calcular destIdx aquí (dentro del intervalo) para que las paradas ya estén cargadas
+      const destIdx = stops.findIndex(
+        (s) => haversineMeters(s.lat, s.lng, destLat, destLng) < 80
+      );
 
       // Calcular distancia a lo largo de la ruta si tenemos paradas y destino indexado
       let dist: number;
@@ -467,16 +468,14 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         }
 
         if (nearestIdx >= destIdx) {
-          // Ya pasó la parada destino
-          setDropoffBanner('missed');
-          prevDistToDestRef.current = 0;
-          return;
-        }
-
-        // Distancia acumulada: usuario → parada cercana → ... → destino
-        dist = nearestDist;
-        for (let i = nearestIdx; i < destIdx; i++) {
-          dist += haversineMeters(stops[i].lat, stops[i].lng, stops[i + 1].lat, stops[i + 1].lng);
+          // El usuario está en la parada destino o muy cerca — distancia directa
+          dist = nearestDist;
+        } else {
+          // Distancia acumulada: usuario → parada cercana → ... → destino
+          dist = nearestDist;
+          for (let i = nearestIdx; i < destIdx; i++) {
+            dist += haversineMeters(stops[i].lat, stops[i].lng, stops[i + 1].lat, stops[i + 1].lng);
+          }
         }
       } else {
         // Fallback: línea recta
@@ -703,6 +702,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         route_id: selectedRoute.id,
         latitude: pos[0],
         longitude: pos[1],
+        destination_stop_id: initialDestinationStopId,
       });
       const trip = res.data.trip as ActiveTripFull;
       setActiveTrip(trip);
@@ -1065,13 +1065,13 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         {dropoffPrompt && (
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 space-y-2.5">
             <p className="text-sm font-semibold text-blue-800">
-              🔔 Activar alerta de bajada · 12 créditos
+              🔔 Activar alerta de bajada · 5 créditos
             </p>
             <div className="flex gap-1.5">
               <button
                 onClick={async () => {
                   try {
-                    await creditsApi.spend({ amount: 12, feature: 'bajada', description: 'Alerta de bajada' });
+                    await creditsApi.spend({ amount: 5, feature: 'bajada', description: 'Alerta de bajada' });
                     alertActivatedRef.current = true;
                     setDropoffPrompt(false);
                   } catch {
@@ -1080,7 +1080,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
                 }}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl text-sm transition-colors"
               >
-                Activar (12 créditos)
+                Activar (5 créditos)
               </button>
               <button
                 onClick={() => { alertDeclinedRef.current = true; setDropoffPrompt(false); }}

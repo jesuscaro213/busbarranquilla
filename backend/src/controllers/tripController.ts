@@ -5,7 +5,7 @@ import { getIo } from '../config/socket';
 
 // Iniciar viaje (Me subí)
 export const startTrip = async (req: Request, res: Response): Promise<void> => {
-  const { route_id, latitude, longitude } = req.body;
+  const { route_id, latitude, longitude, destination_stop_id } = req.body;
   const userId = (req as any).userId;
 
   if (!latitude || !longitude) {
@@ -26,10 +26,10 @@ export const startTrip = async (req: Request, res: Response): Promise<void> => {
     }
 
     const result = await pool.query(
-      `INSERT INTO active_trips (user_id, route_id, current_latitude, current_longitude)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO active_trips (user_id, route_id, current_latitude, current_longitude, destination_stop_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [userId, route_id || null, latitude, longitude]
+      [userId, route_id || null, latitude, longitude, destination_stop_id || null]
     );
 
     const trip = result.rows[0];

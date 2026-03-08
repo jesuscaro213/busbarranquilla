@@ -98,7 +98,13 @@ export const getPlans = async (_req: Request, res: Response): Promise<void> => {
         name: 'Mensual',
         price_cop: 4900,
         duration_days: 30,
-        features: ['Sin anuncios', 'Alertas de bajada gratis', 'Acceso prioritario'],
+        features: [
+          'Alertas de bajada automáticas (sin costo)',
+          'Ver ocupación del bus gratis',
+          'Todas las funciones sin gastar créditos',
+          'Tus créditos solo crecen — nunca se descuentan',
+          '+50 créditos de bono al activar',
+        ],
       },
     ],
   });

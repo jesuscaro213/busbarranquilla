@@ -209,7 +209,7 @@ export const tripsApi = {
   getActiveBuses: () =>
     api.get('/api/trips/buses'),
 
-  start: (data: { route_id: number; latitude: number; longitude: number }) =>
+  start: (data: { route_id: number; latitude: number; longitude: number; destination_stop_id?: number }) =>
     api.post('/api/trips/start', data),
 
   updateLocation: (data: { latitude: number; longitude: number }) =>

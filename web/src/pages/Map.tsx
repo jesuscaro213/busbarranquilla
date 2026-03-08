@@ -85,8 +85,9 @@ export default function Map() {
     latitude: number; longitude: number; name: string;
   } | null>(null);
 
-  // Route ID to auto-board from planner
+  // Route ID + destination stop to auto-board from planner
   const [pendingBoardRouteId, setPendingBoardRouteId] = useState<number | undefined>(undefined);
+  const [pendingDestinationStopId, setPendingDestinationStopId] = useState<number | undefined>(undefined);
   // Incrementar este key fuerza remount de CatchBusMode (limpia selección al volver)
   const [catchBusModeKey, setCatchBusModeKey] = useState(0);
 
@@ -412,6 +413,7 @@ export default function Map() {
               onRouteGeometry={setActiveTripGeometry}
               onBoardingStop={setCatchBusBoardingStop}
               initialRouteId={pendingBoardRouteId}
+              initialDestinationStopId={pendingDestinationStopId}
               onTripEnd={() => {
                 setSheetMode('feed');
                 setActiveTripGeometry(null);
@@ -458,8 +460,9 @@ export default function Map() {
                 setPlanRouteStops(routeStops);
                 setPlanDropoffStop(dropoffStop);
               }}
-              onBoardRoute={(routeId) => {
+              onBoardRoute={(routeId, destinationStopId) => {
                 setPendingBoardRouteId(routeId);
+                setPendingDestinationStopId(destinationStopId);
                 setCatchBusModeKey((k) => k + 1);
                 setSheetMode('trip');
                 setSheetState('middle');

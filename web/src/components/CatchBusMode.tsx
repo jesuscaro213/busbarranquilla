@@ -3,6 +3,10 @@ import { routesApi, tripsApi, reportsApi, usersApi, creditsApi } from '../servic
 import type { ReportType } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socket';
+import CatchBusNearby from './CatchBusNearby';
+import CatchBusList from './CatchBusList';
+import CatchBusWaiting from './CatchBusWaiting';
+import CatchBusActive from './CatchBusActive';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,31 +71,7 @@ interface RouteReport {
   created_at: string;
 }
 
-const REPORT_TYPE_LABEL: Record<string, { emoji: string; label: string }> = {
-  desvio:         { emoji: '🔀', label: 'Desvío' },
-  trancon:        { emoji: '🚦', label: 'Trancón' },
-  lleno:          { emoji: '🔴', label: 'Bus lleno' },
-  bus_disponible: { emoji: '🟢', label: 'Hay sillas' },
-  sin_parar:      { emoji: '🚫', label: 'No paró' },
-  espera:         { emoji: '⏱️', label: 'Larga espera' },
-};
-
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const QUICK_REPORTS: { type: ReportType; emoji: string; label: string; credits: number }[] = [
-  { type: 'desvio',  emoji: '🔀', label: 'Desvío',  credits: 4 },
-  { type: 'trancon', emoji: '🚦', label: 'Trancón', credits: 4 },
-];
-
-const OCCUPANCY_REPORTS: { type: ReportType; emoji: string; label: string; credits: number }[] = [
-  { type: 'lleno',          emoji: '🔴', label: 'Bus lleno',   credits: 3 },
-  { type: 'bus_disponible', emoji: '🟢', label: 'Hay sillas',  credits: 3 },
-];
-
-const OCCUPANCY_STATE_LABEL: Record<string, { emoji: string; label: string; color: string }> = {
-  lleno:      { emoji: '🔴', label: 'Bus lleno',  color: 'bg-red-100 text-red-700 border-red-200' },
-  disponible: { emoji: '🟢', label: 'Hay sillas', color: 'bg-green-100 text-green-700 border-green-200' },
-};
 const REPORT_RATE_LIMIT_TOAST = 'Ya reportaste mucho hoy en esta ruta 🙏';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1015,517 +995,126 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   // ── Active trip view ──────────────────────────────────────────────────
   if (view === 'active' && activeTrip) {
     const eta = computeEta();
-
     return (
-      <div className="space-y-3">
-        {toast && (
-          <div className="bg-gray-900 text-white text-sm rounded-xl px-3 py-2 text-center">
-            {toast.msg}
-          </div>
-        )}
-
-        {/* ── Header card ── */}
-        <div className="bg-green-50 border border-green-100 rounded-2xl p-4 space-y-2.5">
-          {/* Live badge */}
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
-            <span className="text-xs text-green-700 font-semibold uppercase tracking-wide">En ruta</span>
-          </div>
-
-          {/* Route name + code + company */}
-          <div className="flex items-start gap-2">
-            {activeTrip.route_code && (
-              <span className="bg-blue-600 text-white text-sm font-bold px-2 py-0.5 rounded-md shrink-0 mt-0.5">
-                {activeTrip.route_code}
-              </span>
-            )}
-            <div className="min-w-0">
-              <p className="font-bold text-gray-900 leading-tight">
-                {activeTrip.route_name ?? 'Bus activo'}
-              </p>
-              {activeTripCompany && (
-                <p className="text-xs text-gray-500 mt-0.5">{activeTripCompany}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Time + credits */}
-          <div className="flex items-end justify-between border-t border-green-100 pt-2">
-            <div>
-              {activeTrip.destination_stop_name && eta !== null ? (
-                <>
-                  <p className="text-sm font-semibold text-blue-700">⏱ ~{eta} min restantes</p>
-                  <p className="text-xs text-gray-400 mt-0.5">→ {activeTrip.destination_stop_name}</p>
-                </>
-              ) : (
-                <p className="text-sm font-semibold text-gray-700">
-                  ⏱ Viajando: {fmtTime(elapsed)}
-                </p>
-              )}
-            </div>
-            <div className="text-right">
-              <p className="text-2xl font-bold text-green-600 leading-none">+{creditsThisTrip}</p>
-              <p className="text-xs text-gray-400">⚡ créditos</p>
-            </div>
-          </div>
-
-          {/* GPS lost badge */}
-          {gpsLost && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-center">
-              <p className="text-xs text-amber-700">📡 Sin señal GPS — pausado</p>
-            </div>
-          )}
-        </div>
-
-        {/* ── Deviation alert banner ── */}
-        {deviationAlert && (
-          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3.5 space-y-2.5">
-            <p className="text-sm font-semibold text-orange-800">
-              🔀 El bus parece estar fuera de su ruta habitual
-            </p>
-            <div className="flex flex-col gap-1.5">
-              <button
-                onClick={async () => {
-                  const pos = userPositionRef.current;
-                  if (pos) {
-                    await reportsApi.create({
-                      route_id: activeTrip.route_id ?? undefined,
-                      type: 'desvio',
-                      latitude: pos[0],
-                      longitude: pos[1],
-                    }).then(() => {
-                      showToast('⚡ +4 créditos — Desvío reportado');
-                    }).catch((err: unknown) => {
-                      const e = err as { response?: { status?: number } };
-                      if (e?.response?.status === 429) {
-                        showToast(REPORT_RATE_LIMIT_TOAST);
-                      }
-                    });
-                  }
-                  setDeviationAlert(false);
-                }}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 rounded-xl text-sm transition-colors"
-              >
-                🔀 Reportar desvío
-              </button>
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => { setDeviationAlert(false); setShowEndConfirm(true); }}
-                  className="flex-1 border border-gray-200 text-gray-600 font-medium py-2 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  Me bajé
-                </button>
-                <button
-                  onClick={() => {
-                    ignoreDeviationUntilRef.current = Date.now() + 300000;
-                    setDeviationAlert(false);
-                  }}
-                  className="flex-1 border border-gray-200 text-gray-500 font-medium py-2 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  Ignorar (5 min)
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Dropoff activation prompt (free users) ── */}
-        {dropoffPrompt && (
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 space-y-2.5">
-            <p className="text-sm font-semibold text-blue-800">
-              🔔 Activar alerta de bajada · 5 créditos
-            </p>
-            <div className="flex gap-1.5">
-              <button
-                onClick={async () => {
-                  try {
-                    await creditsApi.spend({ amount: 5, feature: 'bajada', description: 'Alerta de bajada' });
-                    alertActivatedRef.current = true;
-                    setDropoffPrompt(false);
-                  } catch {
-                    showToast('Sin créditos suficientes. Reporta para ganar más.');
-                  }
-                }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl text-sm transition-colors"
-              >
-                Activar (5 créditos)
-              </button>
-              <button
-                onClick={() => { alertDeclinedRef.current = true; setDropoffPrompt(false); }}
-                className="flex-1 border border-gray-200 text-gray-500 font-medium py-2 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-              >
-                No activar
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Dropoff proximity banners ── */}
-        {dropoffBanner === 'prepare' && (
-          <div className="bg-yellow-50 border border-yellow-300 rounded-xl px-3 py-2.5 text-center">
-            <p className="text-sm font-semibold text-yellow-800">⚠️ Prepárate, tu parada se acerca</p>
-          </div>
-        )}
-        {dropoffBanner === 'now' && (
-          <div className="bg-orange-100 border border-orange-400 rounded-xl px-3 py-2.5 text-center animate-pulse">
-            <p className="text-sm font-bold text-orange-900">
-              🔔 ¡Próxima parada es la tuya! — {activeTrip.destination_stop_name}
-            </p>
-          </div>
-        )}
-        {dropoffBanner === 'missed' && (
-          <div className="bg-red-50 border border-red-300 rounded-xl px-3 py-2.5 text-center">
-            <p className="text-sm font-semibold text-red-700">Parece que pasaste tu parada</p>
-          </div>
-        )}
-
-        {/* ── Estado de ocupación global ── */}
-        {occupancyState && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${OCCUPANCY_STATE_LABEL[occupancyState].color}`}>
-            <span>{OCCUPANCY_STATE_LABEL[occupancyState].emoji}</span>
-            <span>Estado actual: {OCCUPANCY_STATE_LABEL[occupancyState].label}</span>
-          </div>
-        )}
-
-        {/* ── Reportes de otros en tu bus ── */}
-        {routeReports.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <p className="text-xs text-gray-400">Reportes en tu bus</p>
-              {confirmCreditsEarned > 0 && (
-                <span className="text-xs text-green-600 font-semibold">⚡ +{confirmCreditsEarned} confirmados</span>
-              )}
-            </div>
-            <div className="space-y-2">
-              {routeReports.map((report) => {
-                const label = REPORT_TYPE_LABEL[report.type] ?? { emoji: '📍', label: report.type };
-                const validityText = report.is_valid
-                  ? '✅ Válido'
-                  : `${report.confirmations}/${report.needed_confirmations} confirmaciones`;
-                return (
-                  <div key={report.id} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
-                    <span className="text-xl leading-none">{label.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 leading-tight">{label.label}</p>
-                      <p className={`text-xs leading-tight ${report.is_valid ? 'text-green-600' : 'text-gray-400'}`}>
-                        {validityText}
-                      </p>
-                    </div>
-                    {!report.confirmed_by_me && confirmCreditsEarned < 3 ? (
-                      <button
-                        onClick={() => handleConfirmReport(report.id)}
-                        className="shrink-0 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        Confirmar
-                      </button>
-                    ) : (
-                      <span className="shrink-0 text-xs text-gray-400">
-                        {report.confirmed_by_me ? '✓ Confirmado' : '🔒 Límite'}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Quick report grid ── */}
-        <div>
-          <p className="text-xs text-gray-400 mb-1.5">Reportar incidencia</p>
-          <div className="grid grid-cols-4 gap-1.5">
-            {/* Botones fijos: desvío y trancón */}
-            {QUICK_REPORTS.map(({ type, emoji, label, credits }) => (
-              <button
-                key={type}
-                onClick={() => handleQuickReport(type, credits)}
-                className={`flex flex-col items-center gap-0.5 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 ${
-                  flashedBtn === type
-                    ? 'bg-green-500 text-white scale-95'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                }`}
-              >
-                <span className="text-xl leading-none">{emoji}</span>
-                <span className="leading-tight text-center">{label}</span>
-              </button>
-            ))}
-
-            {/* Botones de ocupación: lleno y hay sillas */}
-            {OCCUPANCY_REPORTS.map(({ type, emoji, label, credits }) => (
-              <button
-                key={type}
-                onClick={() => handleQuickReport(type, credits)}
-                className={`flex flex-col items-center gap-0.5 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 ${
-                  flashedBtn === type
-                    ? 'bg-green-500 text-white scale-95'
-                    : userLastOccupancy === type
-                    ? type === 'lleno'
-                      ? 'bg-red-100 text-red-700 border border-red-200'
-                      : 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                }`}
-              >
-                <span className="text-xl leading-none">{emoji}</span>
-                <span className="leading-tight text-center">{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ── End trip ── */}
-        <button
-          onClick={handleShareBus}
-          className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold py-2.5 rounded-xl text-sm transition-colors"
-        >
-          📤 Compartir este bus
-        </button>
-
-        <button
-          onClick={() => setShowEndConfirm(true)}
-          className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl text-sm transition-colors"
-        >
-          🛑 Me bajé — Finalizar viaje
-        </button>
-
-        {/* Inactivity alert modal */}
-        {inactiveAlert && (
-          <div className="fixed inset-0 z-[2100] bg-black/50 flex items-end justify-center px-4 pb-6">
-            <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
-              <p className="text-2xl text-center">🤔</p>
-              <p className="font-semibold text-gray-900 text-center">¿Sigues en el bus?</p>
-              <p className="text-sm text-gray-500 text-center">Llevas un rato sin moverte.</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    inactiveSecondsRef.current = 0;
-                    hasBeenWarnedRef.current = true;
-                    setInactiveAlert(false);
-                    if (autoCloseTimerRef.current) {
-                      clearTimeout(autoCloseTimerRef.current);
-                      autoCloseTimerRef.current = null;
-                    }
-                  }}
-                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                  Sí, sigo viajando
-                </button>
-                <button
-                  onClick={() => {
-                    setInactiveAlert(false);
-                    if (autoCloseTimerRef.current) {
-                      clearTimeout(autoCloseTimerRef.current);
-                      autoCloseTimerRef.current = null;
-                    }
-                    setShowEndConfirm(true);
-                  }}
-                  className="flex-1 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  No, ya me bajé
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Suspicious inactivity alert modal */}
-        {suspiciousAlert && (
-          <div className="fixed inset-0 z-[2200] bg-black/60 flex items-end justify-center px-4 pb-6">
-            <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
-              <p className="text-2xl text-center">⚠️</p>
-              <p className="font-semibold text-gray-900 text-center">Llevas 30 minutos sin moverte</p>
-              <p className="text-sm text-gray-500 text-center">
-                ¿Qué está pasando? Si ya te bajaste del bus se descontarán 30 minutos del bonus acumulado.
-              </p>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => {
-                    inactiveSecondsRef.current = 0;
-                    setSuspiciousAlert(false);
-                    if (autoCloseTimerRef.current) {
-                      clearTimeout(autoCloseTimerRef.current);
-                      autoCloseTimerRef.current = null;
-                    }
-                  }}
-                  className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                  🚦 Estoy en un trancón
-                </button>
-                <button
-                  onClick={() => {
-                    setSuspiciousAlert(false);
-                    if (autoCloseTimerRef.current) {
-                      clearTimeout(autoCloseTimerRef.current);
-                      autoCloseTimerRef.current = null;
-                    }
-                    handleEnd(30);
-                  }}
-                  className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                  🛑 Ya me bajé — Finalizar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* End confirm modal */}
-        {showEndConfirm && (
-          <div className="fixed inset-0 z-[2000] bg-black/50 flex items-end justify-center px-4 pb-6">
-            <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
-              <p className="font-semibold text-gray-900 text-center">¿Confirmás que te bajaste?</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowEndConfirm(false)}
-                  className="flex-1 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  No, sigo en el bus
-                </button>
-                <button
-                  onClick={() => handleEnd()}
-                  disabled={tripLoading}
-                  className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                  {tripLoading ? 'Finalizando...' : '✅ Sí, me bajé'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <CatchBusActive
+        toastMessage={toast?.msg ?? null}
+        activeTrip={activeTrip}
+        activeTripCompany={activeTripCompany}
+        eta={eta}
+        elapsedLabel={fmtTime(elapsed)}
+        creditsThisTrip={creditsThisTrip}
+        gpsLost={gpsLost}
+        deviationAlert={deviationAlert}
+        dropoffPrompt={dropoffPrompt}
+        dropoffBanner={dropoffBanner}
+        occupancyState={occupancyState}
+        routeReports={routeReports}
+        confirmCreditsEarned={confirmCreditsEarned}
+        flashedBtn={flashedBtn}
+        userLastOccupancy={userLastOccupancy}
+        inactiveAlert={inactiveAlert}
+        suspiciousAlert={suspiciousAlert}
+        showEndConfirm={showEndConfirm}
+        tripLoading={tripLoading}
+        onReportDeviation={async () => {
+          const pos = userPositionRef.current;
+          if (pos) {
+            await reportsApi.create({
+              route_id: activeTrip.route_id ?? undefined,
+              type: 'desvio',
+              latitude: pos[0],
+              longitude: pos[1],
+            }).then(() => {
+              showToast('⚡ +4 créditos — Desvío reportado');
+            }).catch((err: unknown) => {
+              const e = err as { response?: { status?: number } };
+              if (e?.response?.status === 429) {
+                showToast(REPORT_RATE_LIMIT_TOAST);
+              }
+            });
+          }
+          setDeviationAlert(false);
+        }}
+        onDeviationExit={() => { setDeviationAlert(false); setShowEndConfirm(true); }}
+        onIgnoreDeviation={() => {
+          ignoreDeviationUntilRef.current = Date.now() + 300000;
+          setDeviationAlert(false);
+        }}
+        onActivateDropoff={async () => {
+          try {
+            await creditsApi.spend({ amount: 5, feature: 'bajada', description: 'Alerta de bajada' });
+            alertActivatedRef.current = true;
+            setDropoffPrompt(false);
+          } catch {
+            showToast('Sin créditos suficientes. Reporta para ganar más.');
+          }
+        }}
+        onDeclineDropoff={() => { alertDeclinedRef.current = true; setDropoffPrompt(false); }}
+        onConfirmReport={handleConfirmReport}
+        onQuickReport={handleQuickReport}
+        onShareBus={handleShareBus}
+        onRequestEnd={() => setShowEndConfirm(true)}
+        onInactiveContinue={() => {
+          inactiveSecondsRef.current = 0;
+          hasBeenWarnedRef.current = true;
+          setInactiveAlert(false);
+          if (autoCloseTimerRef.current) {
+            clearTimeout(autoCloseTimerRef.current);
+            autoCloseTimerRef.current = null;
+          }
+        }}
+        onInactiveEnd={() => {
+          setInactiveAlert(false);
+          if (autoCloseTimerRef.current) {
+            clearTimeout(autoCloseTimerRef.current);
+            autoCloseTimerRef.current = null;
+          }
+          setShowEndConfirm(true);
+        }}
+        onSuspiciousTraffic={() => {
+          inactiveSecondsRef.current = 0;
+          setSuspiciousAlert(false);
+          if (autoCloseTimerRef.current) {
+            clearTimeout(autoCloseTimerRef.current);
+            autoCloseTimerRef.current = null;
+          }
+        }}
+        onSuspiciousEnd={() => {
+          setSuspiciousAlert(false);
+          if (autoCloseTimerRef.current) {
+            clearTimeout(autoCloseTimerRef.current);
+            autoCloseTimerRef.current = null;
+          }
+          handleEnd(30);
+        }}
+        onCancelEndConfirm={() => setShowEndConfirm(false)}
+        onConfirmEnd={() => handleEnd()}
+      />
     );
   }
 
   // ── Waiting view ──────────────────────────────────────────────────────
   if (view === 'waiting' && selectedRoute) {
+    const boardingDistanceMeters = userPosition && boardingStop
+      ? Math.round(haversineMeters(userPosition[0], userPosition[1], boardingStop.latitude, boardingStop.longitude))
+      : null;
+
     return (
-      <div className="space-y-3">
-        {toast && (
-          <div className="bg-gray-900 text-white text-sm rounded-xl px-3 py-2 text-center">
-            {toast.msg}
-          </div>
-        )}
-
-        {/* Route info */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-3.5 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="bg-blue-600 text-white text-sm font-bold px-2 py-0.5 rounded-md shrink-0">
-              {selectedRoute.code}
-            </span>
-            <p className="font-semibold text-gray-900 truncate">{selectedRoute.name}</p>
-          </div>
-          {selectedRoute.company_name && (
-            <p className="text-xs text-gray-400">{selectedRoute.company_name}</p>
-          )}
-          {selectedRoute.frequency_minutes && (
-            <p className="text-xs text-gray-400">🕐 Cada {selectedRoute.frequency_minutes} min</p>
-          )}
-        </div>
-
-        {/* Route activity */}
-        {routeActivity && (
-          <div className="bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-3 text-sm text-gray-700">
-            {routeActivity.active_count > 0 ? (
-              <span className="font-medium text-green-700">
-                🚌 {routeActivity.active_count} {routeActivity.active_count === 1 ? 'persona' : 'personas'} en el bus ahora
-              </span>
-            ) : routeActivity.last_activity_minutes !== null ? (
-              <span className="text-gray-500">
-                📡 Última actividad hace {routeActivity.last_activity_minutes} min
-              </span>
-            ) : (
-              <span className="text-gray-400">Sin actividad reciente en esta ruta</span>
-            )}
-          </div>
-        )}
-
-        {/* Boarding stop guide */}
-        {boardingStop && (
-          <div className="bg-green-50 border border-green-100 rounded-2xl p-3.5 space-y-2">
-            <div className="flex items-start gap-2">
-              <span className="text-lg shrink-0">📍</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-green-800 uppercase tracking-wide">
-                  Parada de abordaje
-                </p>
-                <p className="text-sm font-medium text-gray-800 truncate">
-                  {boardingStop.name?.trim() || 'Parada más cercana'}
-                </p>
-                {userPosition && (
-                  <p className="text-xs text-green-700 mt-0.5">
-                    🚶 {Math.round(haversineMeters(userPosition[0], userPosition[1], boardingStop.latitude, boardingStop.longitude))} m caminando
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Waiting indicator */}
-        <div className="flex items-center justify-center gap-2 py-1">
-          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
-          <p className="text-sm font-medium text-gray-600">Esperando el bus...</p>
-        </div>
-
-        {/* Wait quick reports */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleWaitReport('sin_parar', 4)}
-            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-2.5 rounded-xl transition-colors"
-          >
-            🚫 El bus pasó sin parar
-          </button>
-          <button
-            onClick={() => handleWaitReport('espera', 3)}
-            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-2.5 rounded-xl transition-colors"
-          >
-            👥 Mucha gente esperando
-          </button>
-        </div>
-
-        {/* Confirm board */}
-        <button
-          onClick={() => setShowBoardConfirm(true)}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl text-sm transition-colors"
-        >
-          🚌 Ya me monté — Confirmar
-        </button>
-
-        {/* Cancel */}
-        <button
-          onClick={() => { setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
-          className="w-full text-gray-400 hover:text-gray-600 text-sm py-1.5 transition-colors"
-        >
-          El bus no llegó — cancelar
-        </button>
-
-        {/* Board confirm modal */}
-        {showBoardConfirm && (
-          <div className="fixed inset-0 z-[2000] bg-black/50 flex items-end justify-center px-4 pb-6">
-            <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-3 shadow-2xl">
-              <p className="font-semibold text-gray-900 text-center">
-                ¿Confirmás que estás en el bus{' '}
-                <span className="text-blue-600 font-bold">{selectedRoute.code}</span>?
-              </p>
-              <p className="text-sm text-gray-500 text-center">{selectedRoute.name}</p>
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={() => { setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
-                  className="flex-1 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
-                >
-                  No, cogí otro
-                </button>
-                <button
-                  onClick={handleStart}
-                  disabled={tripLoading}
-                  className="flex-1 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                  {tripLoading ? 'Iniciando...' : '✅ Sí, estoy en él'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <CatchBusWaiting
+        toastMessage={toast?.msg ?? null}
+        selectedRoute={selectedRoute}
+        routeActivity={routeActivity}
+        boardingStop={boardingStop}
+        boardingDistanceMeters={boardingDistanceMeters}
+        showBoardConfirm={showBoardConfirm}
+        tripLoading={tripLoading}
+        onWaitReportNoStop={() => handleWaitReport('sin_parar', 4)}
+        onWaitReportCrowded={() => handleWaitReport('espera', 3)}
+        onRequestBoardConfirm={() => setShowBoardConfirm(true)}
+        onCancelWaiting={() => { setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
+        onConfirmDifferentBus={() => { setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
+        onStartTrip={handleStart}
+      />
     );
   }
 
@@ -1538,217 +1127,28 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         </div>
       )}
 
-      {/* Cerca de ti */}
-      {(nearbyLoading || nearbyRoutes.length > 0) && (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">📍 Cerca de ti</p>
-            <button
-              onClick={() => { if (userPositionRef.current) fetchNearbyRoutes(userPositionRef.current); }}
-              disabled={nearbyLoading}
-              className="text-xs text-blue-500 disabled:opacity-40 font-medium"
-            >
-              {nearbyLoading ? 'Actualizando...' : '↻ Actualizar'}
-            </button>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {nearbyLoading
-              ? [0, 1, 2].map((i) => (
-                  <div key={i} className="shrink-0 w-24 h-16 bg-gray-100 rounded-xl animate-pulse" />
-                ))
-              : nearbyRoutes.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => handleSelectRoute(r)}
-                    className="shrink-0 flex flex-col items-start gap-0.5 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 hover:bg-blue-100 transition-colors min-w-[120px] max-w-[160px]"
-                  >
-                    <span className="text-xs font-bold text-gray-900 leading-tight truncate w-full text-left">
-                      {r.company_name ?? r.code}
-                    </span>
-                    <span className="text-[10px] text-gray-500 truncate w-full text-left leading-tight">
-                      {r.name}
-                    </span>
-                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
-                        {r.code}
-                      </span>
-                      {r.min_distance !== undefined && (
-                        <span className="text-[10px] text-gray-400">
-                          {Math.round(r.min_distance * 1000)} m
-                        </span>
-                      )}
-                      {routeOccupancy[r.id] && (
-                        <span className="text-[10px] font-semibold">
-                          {OCCUPANCY_STATE_LABEL[routeOccupancy[r.id]].emoji}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-          </div>
-        </div>
-      )}
-
-      {/* Type filter tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-        {(['all', 'transmetro', 'bus'] as RouteTypeFilter[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setTypeFilter(f)}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              typeFilter === f
-                ? 'bg-white shadow-sm text-gray-900'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {f === 'all' ? 'Todos' : f === 'transmetro' ? '🚇 Transmetro' : '🚌 Bus'}
-          </button>
-        ))}
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar ruta..."
-          className="w-full border border-gray-200 rounded-xl pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : (
-        <div className="space-y-4 max-h-[52vh] overflow-y-auto pb-2">
-          {favRoutes.length > 0 && (
-            <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                ⭐ Favoritas
-              </h3>
-              <div className="space-y-1">
-                {favRoutes.map((r) => (
-                  <RouteRow
-                    key={r.id}
-                    route={r}
-                    isFav={true}
-                    onSelect={handleSelectRoute}
-                    onToggleFav={toggleFavorite}
-                    occupancy={routeOccupancy[r.id]}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {transmetroRoutes.length > 0 && (
-            <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                🚇 Transmetro
-              </h3>
-              <div className="space-y-1">
-                {transmetroRoutes.map((r) => (
-                  <RouteRow
-                    key={r.id}
-                    route={r}
-                    isFav={false}
-                    onSelect={handleSelectRoute}
-                    onToggleFav={toggleFavorite}
-                    occupancy={routeOccupancy[r.id]}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {Object.entries(busRoutesByCompany)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([company, companyRoutes]) => (
-              <section key={company}>
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  🚌 {company}
-                </h3>
-                <div className="space-y-1">
-                  {companyRoutes.map((r) => (
-                    <RouteRow
-                      key={r.id}
-                      route={r}
-                      isFav={false}
-                      onSelect={handleSelectRoute}
-                      onToggleFav={toggleFavorite}
-                      occupancy={routeOccupancy[r.id]}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))
-          }
-
-          {filtered.length === 0 && (
-            <p className="text-gray-400 text-sm text-center py-6">Sin resultados</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── RouteRow subcomponent ────────────────────────────────────────────────────
-
-function RouteRow({
-  route,
-  isFav,
-  onSelect,
-  onToggleFav,
-  occupancy,
-}: {
-  route: Route;
-  isFav: boolean;
-  onSelect: (r: Route) => void;
-  onToggleFav: (e: React.MouseEvent, id: number) => void;
-  occupancy?: 'lleno' | 'disponible';
-}) {
-  const routeColor = route.color || '#1d4ed8';
-
-  return (
-    <div
-      onClick={() => onSelect(route)}
-      className="w-full flex items-center gap-2.5 px-3 py-2.5 bg-white border border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-100 transition-colors text-left cursor-pointer"
-    >
-      <div
-        className="w-3 h-3 rounded-full shrink-0 border border-black/10"
-        style={{ backgroundColor: routeColor }}
+      <CatchBusNearby
+        nearbyLoading={nearbyLoading}
+        nearbyRoutes={nearbyRoutes}
+        routeOccupancy={routeOccupancy}
+        onRefresh={() => { if (userPositionRef.current) fetchNearbyRoutes(userPositionRef.current); }}
+        onSelectRoute={(route) => handleSelectRoute(route as Route)}
       />
-      <span
-        className="text-white text-xs font-bold px-2 py-0.5 rounded-md shrink-0"
-        style={{ backgroundColor: routeColor }}
-      >
-        {route.code}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-gray-800 truncate">
-          {route.company_name ?? route.name}
-        </p>
-        <div className="flex items-center gap-1.5">
-          {route.frequency_minutes && (
-            <p className="text-xs text-gray-400">Cada {route.frequency_minutes} min</p>
-          )}
-          {occupancy && (
-            <span className="text-xs font-semibold">
-              {OCCUPANCY_STATE_LABEL[occupancy].emoji} {OCCUPANCY_STATE_LABEL[occupancy].label}
-            </span>
-          )}
-        </div>
-      </div>
-      <button
-        onClick={(e) => onToggleFav(e, route.id)}
-        className="shrink-0 text-lg leading-none"
-      >
-        {isFav ? '⭐' : '☆'}
-      </button>
+
+      <CatchBusList
+        typeFilter={typeFilter}
+        search={search}
+        loading={loading}
+        favRoutes={favRoutes}
+        transmetroRoutes={transmetroRoutes}
+        busRoutesByCompany={busRoutesByCompany}
+        filteredCount={filtered.length}
+        routeOccupancy={routeOccupancy}
+        onTypeFilterChange={setTypeFilter}
+        onSearchChange={setSearch}
+        onSelectRoute={(route) => handleSelectRoute(route as Route)}
+        onToggleFavorite={toggleFavorite}
+      />
     </div>
   );
 }

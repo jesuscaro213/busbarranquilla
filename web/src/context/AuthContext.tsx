@@ -84,7 +84,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const refreshProfile = async () => {
     const res = await authApi.getProfile();
-    setUser(res.data.user);
+    setUser({ ...res.data.user });
   };
 
   return (

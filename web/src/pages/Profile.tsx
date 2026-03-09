@@ -149,6 +149,7 @@ export default function Profile() {
     try {
       await authApi.updateProfile({ name: trimmed });
       await refreshProfile();
+      setNameInput(trimmed);
       setSuccess('Nombre actualizado.');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;

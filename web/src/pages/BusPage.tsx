@@ -19,6 +19,8 @@ export default function BusPage() {
   const [route, setRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [showAppBanner, setShowAppBanner] = useState(true);
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad/i.test(navigator.userAgent);
 
   useEffect(() => {
     if (!id) return;
@@ -59,6 +61,30 @@ export default function BusPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-lg mx-auto px-4 py-10 space-y-5">
+        {isMobile && showAppBanner && (
+          <div className="bg-blue-700 text-white px-4 py-3 flex items-center justify-between gap-3 rounded-2xl">
+            <div>
+              <p className="text-sm font-semibold">🚌 Abre MiBus</p>
+              <p className="text-xs text-blue-200">Sigue el bus en tiempo real</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={`mibus://bus/${id}`}
+                className="bg-white text-blue-700 text-xs font-bold px-3 py-1.5 rounded-lg"
+              >
+                Abrir app
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowAppBanner(false)}
+                className="text-blue-200 hover:text-white text-lg leading-none"
+                aria-label="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Header */}
         <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-6 text-center">

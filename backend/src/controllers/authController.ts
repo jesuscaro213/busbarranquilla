@@ -81,11 +81,24 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     phone?: string;
     referralCode?: string;
   };
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!name?.trim() || !email?.trim() || !password) {
+    res.status(400).json({ message: 'Nombre, correo y contraseña son obligatorios' });
+    return;
+  }
+  if (!emailRegex.test(email.trim())) {
+    res.status(400).json({ message: 'El correo electrónico no es válido' });
+    return;
+  }
+  if (password.length < 6) {
+    res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });
+    return;
+  }
 
   try {
     const userExists = await pool.query(
       'SELECT id FROM users WHERE email = $1',
-      [email]
+      [email.trim()]
     );
 
     if (userExists.rows.length > 0) {
@@ -115,7 +128,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       `INSERT INTO users (name, email, password, phone, credits, role, is_premium, trial_expires_at, referral_code, referred_by)
        VALUES ($1, $2, $3, $4, $5, 'free', true, NOW() + INTERVAL '14 days', $6, $7)
        RETURNING id, name, email, credits, role, is_premium, trial_expires_at`,
-      [name, email, hashedPassword, phone, welcomeCredits, referralCodeForUser, referrerId]
+      [name.trim(), email.trim(), hashedPassword, phone?.trim(), welcomeCredits, referralCodeForUser, referrerId]
     );
 
     const user = result.rows[0];

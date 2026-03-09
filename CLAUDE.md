@@ -74,12 +74,13 @@ npm run web
 
 **Route groups** (all prefixed `/api/`):
 - `auth` → register, login, profile
-- `routes` → bus route CRUD + search + nearby + active feed + trip planner + geometry
+- `routes` → bus route CRUD + search + nearby + active feed + trip planner (geometry-based) + geometry
 - `stops` → stops per route (CRUD)
 - `reports` → create report, list nearby (geolocation), confirm, resolve
 - `credits` → balance, history, spend
 - `trips` → start trip, update location, end trip, current trip
 - `users` → favorites (add, remove, list)
+- `payments` → Wompi plans, checkout, webhook
 - `admin` → users CRUD + companies CRUD (requires `role = 'admin'`)
 
 **Middleware chain for protected routes:**
@@ -93,7 +94,9 @@ npm run web
 
 **Reports** expire in 30 minutes (`expires_at`). `/api/reports/nearby` filters by radius using Haversine formula. Reports can be self-resolved via `PATCH /api/reports/:id/resolve` (sets `is_active = false`, `resolved_at = NOW()`).
 
-**Route geometry** — stored as JSONB in `routes.geometry`. On create/update, the backend calls OSRM (two-attempt strategy: full route first, then segment-by-segment with straight-line fallback). Geometry can be regenerated on demand via `POST /api/routes/:id/regenerate-geometry`. The `pg` library auto-parses JSONB to `[number, number][]` — no manual JSON.parse needed in frontend.
+**Route geometry** — stored as JSONB in `routes.geometry` as `[lat, lng][]`. On create/update, the backend calls OSRM (two-attempt strategy: full route first, then segment-by-segment with straight-line fallback). Geometry can be regenerated on demand via `POST /api/routes/:id/regenerate-geometry`. The `pg` library auto-parses JSONB to `[number, number][]` — no manual JSON.parse needed in frontend. 78 routes have geometry covering lat 10.83–11.04, lng -74.89–-74.76.
+
+**Trip planner (`/api/routes/plan`)** — geometry-based matching, not stop-based. Uses `haversineKm()` and `minDistToGeometry()` helpers. A route matches if its polyline passes within `ORIGIN_THRESHOLD_KM = 0.25` (250 m) of origin AND within `DEST_THRESHOLD_KM = 0.45` (450 m) of destination, with dest index > origin index (direction check). Fallback to stop-based (0.8 km radius) for routes without geometry. Results sorted by `origin_distance_meters + distance_meters`.
 
 **Socket.io** — configured in `config/socket.ts`. Real-time bus location tracking via `bus:location`, `bus:joined`, `bus:left`, `route:nearby` channels. Route-specific rooms (`route:{id}`) for real-time report events: clients emit `join:route` / `leave:route` when boarding/alighting, server emits `route:new_report` and `route:report_confirmed` to the room.
 
@@ -114,9 +117,10 @@ backend/src/
 │   ├── adminController.ts   # Users CRUD + Companies CRUD
 │   ├── authController.ts    # register, login, profile
 │   ├── creditController.ts  # balance, history, spend, awardCredits()
+│   ├── paymentController.ts # Wompi: getPlans, createCheckout, handleWebhook
 │   ├── recommendController.ts # Route recommendations
 │   ├── reportController.ts  # create, nearby, confirm, resolveReport
-│   ├── routeController.ts   # CRUD + search + nearby + activeFeed + getPlanRoutes + regenerateGeometry
+│   ├── routeController.ts   # CRUD + search + nearby + activeFeed + getPlanRoutes (geometry-based) + regenerateGeometry
 │   ├── stopController.ts    # CRUD per route
 │   ├── tripController.ts    # start, updateLocation, end, active buses, getTripCurrent
 │   └── userController.ts    # listFavorites, addFavorite, removeFavorite
@@ -128,6 +132,7 @@ backend/src/
 │   ├── adminRoutes.ts
 │   ├── authRoutes.ts
 │   ├── creditRoutes.ts
+│   ├── paymentRoutes.ts     # GET /plans, POST /checkout, POST /webhook
 │   ├── reportRoutes.ts
 │   ├── routeRoutes.ts
 │   ├── stopRoutes.ts
@@ -143,12 +148,26 @@ backend/src/
 |--------|------|------|-------------|
 | GET | `/api/reports/route/:routeId` | ✅ | Active reports for a route with `confirmed_by_me`, `is_valid`, `needed_confirmations` — only returns reports from other users |
 
+#### New API endpoints (added in Phase 3 — Wompi payments)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/payments/plans` | public | Returns available plans (currently only `monthly` — $4,900 COP/30 days) |
+| POST | `/api/payments/checkout` | ✅ | Creates Wompi payment link, saves pending payment, returns `checkout_url` |
+| POST | `/api/payments/webhook` | public | Wompi webhook: verifies SHA256 signature, on APPROVED → sets `is_premium=true`, `role='premium'`, extends `premium_expires_at`, awards +50 bonus credits |
+
+#### New API endpoints (added in Phase 3.5)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/reports/route/:routeId` | ✅ | Active reports for a route with `confirmed_by_me`, `is_valid`, `needed_confirmations` — only returns reports from other users |
+
 #### New API endpoints (added in Phase 2)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/routes/active-feed` | ✅ | Up to 8 routes with reports in last 60 min |
-| GET | `/api/routes/plan?destLat=X&destLng=Y` | ✅ | Routes with stops ≤1 km from destination |
+| GET | `/api/routes/plan?originLat=X&originLng=Y&destLat=X&destLng=Y` | ✅ | Geometry-based trip planner: routes whose polyline passes ≤250 m of origin and ≤450 m of dest (direction-aware). Origin optional. |
 | POST | `/api/routes/:id/regenerate-geometry` | admin | Re-fetch OSRM geometry for a route |
 | GET | `/api/trips/current` | ✅ | Active trip for current user (`{ trip: null }` if none) |
 | PATCH | `/api/reports/:id/resolve` | ✅ | Self-resolve own report |
@@ -161,7 +180,7 @@ backend/src/
 ### Web (`web/src/`)
 
 **Routing** — `App.tsx` uses React Router v6 with two nested route groups:
-- **Public layout** (`PublicLayout`) — renders `<Navbar />` + `<Outlet />`. Covers `/`, `/map`, `/login`, `/register`.
+- **Public layout** (`PublicLayout`) — renders `<Navbar />` + `<Outlet />`. Covers `/`, `/map`, `/login`, `/register`, `/premium`, `/payment/result`.
 - **Admin layout** (`AdminRoute` guard + `AdminLayout`) — no Navbar, shows sidebar instead. Covers `/admin/*`.
 
 **Auth state** — `context/AuthContext.tsx` stores JWT in `localStorage`, attaches via axios interceptor in `services/api.ts`. Exposes `user` (with `role: 'admin' | 'premium' | 'free'`), `token`, `loading`, `login`, `register`, `logout`, `refreshProfile`.
@@ -178,24 +197,26 @@ web/src/
 ├── context/
 │   └── AuthContext.tsx            # Auth state + JWT + role
 ├── services/
-│   ├── api.ts                     # axios instance + all API modules
+│   ├── api.ts                     # axios instance + all API modules (incl. paymentsApi)
 │   ├── adminService.ts            # Admin-specific API (users + companies)
 │   └── socket.ts                  # Socket.io client
 ├── components/
 │   ├── AdminRoute.tsx             # Layout route guard (role check → Outlet)
 │   ├── CatchBusMode.tsx           # "Me subí/bajé" flow + 4 background monitors
 │   ├── CreditBalance.tsx
-│   ├── MapView.tsx                # Leaflet map: stops, feed routes, active trip geometry
-│   ├── Navbar.tsx                 # Shows ⚙️ Administración for admin role
+│   ├── MapView.tsx                # Leaflet map: stops, feed routes, active trip geometry + CenterTracker
+│   ├── Navbar.tsx                 # Shows ⚙️ Admin for admin, ⚡ Premium link for non-premium
 │   ├── NearbyRoutes.tsx
-│   ├── PlanTripMode.tsx           # Trip planner: Nominatim autocomplete + /plan endpoint
-│   ├── ReportButton.tsx
+│   ├── PlanTripMode.tsx           # Trip planner: Nominatim geocoding + /plan endpoint
+│   ├── ReportButton.tsx           # Has ✕ close button
 │   ├── RoutePlanner.tsx
 │   └── TripPanel.tsx
 └── pages/
     ├── Home.tsx
     ├── Login.tsx
-    ├── Map.tsx                    # Main map page: wires all modes + geometry state
+    ├── Map.tsx                    # Main map page: wires all modes + geometry state + map pick overlay
+    ├── PaymentResultPage.tsx      # Handles Wompi redirect: ?status=APPROVED|DECLINED
+    ├── PremiumPage.tsx            # Plan listing + Wompi checkout redirect
     ├── Register.tsx
     └── admin/
         ├── AdminLayout.tsx        # Sidebar (gray-900) + Outlet — NO Navbar
@@ -206,7 +227,7 @@ web/src/
 
 #### CatchBusMode — "Cerca de ti" section
 
-Above the filter tabs and search, CatchBusMode shows a **horizontal scroll of nearby route cards** fetched from `/api/routes/nearby?lat=X&lng=Y&radius=0.5` when `userPosition` is available.
+Above the filter tabs and search, CatchBusMode shows a **horizontal scroll of nearby route cards** fetched from `/api/routes/nearby?lat=X&lng=Y&radius=0.3` (300 m) when `userPosition` is available.
 
 - Cards show: route name (where the bus goes), company name (secondary, gray), code badge, distance in meters
 - Tap → same `handleSelectRoute` flow as selecting from the main list (goes to waiting view)
@@ -236,6 +257,7 @@ Active while a trip is running (`view === 'active'`). All monitors start on trip
 | `creditsApi` | getBalance, getHistory, spend |
 | `tripsApi` | getActive, getCurrent, getActiveBuses, start, updateLocation, end |
 | `usersApi` | getFavorites, addFavorite, removeFavorite |
+| `paymentsApi` | getPlans, createCheckout |
 
 #### Admin panel routes
 
@@ -302,6 +324,9 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 ### user_favorite_routes
 `id, user_id (→ users), route_id (→ routes), created_at` — `UNIQUE(user_id, route_id)`
 
+### payments
+`id, user_id (→ users ON DELETE SET NULL), wompi_reference VARCHAR(100) UNIQUE, plan VARCHAR(50), amount_cents INTEGER, status VARCHAR(20) DEFAULT 'pending' CHECK (pending|approved|declined|voided|error), wompi_transaction_id VARCHAR(100), created_at, updated_at`
+
 ---
 
 ## WebSocket Channels
@@ -327,12 +352,14 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Show active buses reported by other users in real time
 
 ### 2. Trip planner
-- User types destination (or picks on map)
-- Start point = current GPS location, or typed address (geocoded via Nominatim + Overpass API for Colombian addresses)
-- Before entering destination: **"Buses en tu zona"** panel shows routes ≤500 m from origin — tap any to preview its full geometry on the map; tapping again deselects; switching routes clears the previous one immediately
-- App finds routes connecting origin → destination via `/api/routes/plan`
-- Shows multiple options ordered by proximity to destination stop
-- Selecting a result clips the route geometry between boarding stop and dropoff stop and draws it on the map (blue polyline); if clipping fails, falls back to full route geometry, then all stops
+- User types destination (or picks on map via crosshair overlay + Confirm button)
+- Start point = current GPS location, or typed address
+- Geocoding: **Nominatim** (primary, `bounded=1`, strict BQ metro bbox) + **Geoapify** fallback. Handles Colombian addresses with "N" separator (e.g. "Cr 52 N 45" → "Cr 52 #45"). Post-fetch filter `isInMetroArea()` removes results outside BQ area. Overpass API for street intersections.
+- Before entering destination: **"Buses en tu zona"** panel shows routes ≤300 m from origin — tap any to preview full geometry on map; tapping again deselects
+- App finds routes connecting origin → destination via `/api/routes/plan` (geometry-based, not stop-based)
+- Shows multiple options ordered by `origin_distance + dest_distance`; distances color-coded (green ≤300 m, amber 300–600 m, red >600 m)
+- Selecting a result clips the route geometry between boarding stop and dropoff stop and draws it on the map (blue polyline); fallback to full geometry, then all stops
+- Map pick mode: fixed crosshair at screen center, instruction banner, Confirm + Cancel buttons overlay — `BottomSheet` hidden via CSS `display:none` (not unmounted) to preserve input state
 
 ### 3. "I boarded" flow
 - User taps "Me subí" (I boarded)
@@ -362,7 +389,7 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - New users get **50 credits** and a **14-day premium trial** on registration.
 - Reports expire after **30 minutes**.
 - Premium users skip all credit checks.
-- Premium plans: $4,900 COP/month or $39,900 COP/year (Wompi).
+- Premium plan: **$4,900 COP/month** (Wompi payment link, single-use, manual renewal). On approval: `is_premium=true`, `role='premium'`, `premium_expires_at` extended 30 days, +50 bonus credits. Webhook verified via SHA256 signature.
 - Credit packages: 100/$1,900 | 300/$4,900 | 700/$9,900 | 1,500/$17,900 COP.
 
 ### Credits earned
@@ -438,11 +465,15 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - Route clipping in `handleSelectRoute` falls back to full geometry (then all stops) if segment indices are invalid
 - Removed "Cómo llegar a pie" (Google Maps external link) from waiting view
 
-### Phase 3 ✅ Partial
+### Phase 3 ✅ Complete
 - Deploy to Vercel + Railway
 - Connect mibus.co domain (Vercel → mibus.co, Railway → api.mibus.co)
-- Wompi payments — **pendiente** (no implementado aún)
-- Premium plans — **pendiente** (depende de Wompi)
+- Wompi payments — `paymentController.ts`, `paymentRoutes.ts`, `PremiumPage.tsx`, `PaymentResultPage.tsx`
+  - `GET /api/payments/plans` — returns monthly plan ($4,900 COP)
+  - `POST /api/payments/checkout` — creates Wompi payment link (single-use)
+  - `POST /api/payments/webhook` — SHA256 signature verification → activates premium + +50 credits bonus
+- `payments` table in DB tracks all transactions with status
+- Navbar shows "⚡ Premium" link for non-premium users; "✓ Premium" badge for active premium
 
 ### Phase 3.5 ✅ Complete
 **Smart report confirmation system:**
@@ -455,8 +486,32 @@ Functions: `getUsers`, `updateUserRole`, `toggleUserActive`, `deleteUser`, `getC
 - New table: `report_confirmations` — prevents double confirmation per user per report
 - New column: `reports.credits_awarded_to_reporter` — prevents double payment to reporter
 
+### Phase 3.6 ✅ Complete
+**Geocoding & UX improvements:**
+- Replaced Photon (no Spanish support) with **Nominatim** primary + **Geoapify** fallback for address autocomplete
+- Colombian address normalization: `N` separator (e.g. "Cr 52 N 45" → "Cr 52 #45"); flexible Overpass regex for street queries
+- Post-fetch `isInMetroArea()` filter + Nominatim `bounded=1` + strict bbox `[10.82,-74.98,11.08,-74.62]` — no results outside BQ metro
+- Postal code detection (`isPostalCode()`) — filters out 080xxx codes from suggestions
+- Map pick mode redesigned: fixed crosshair at screen center, instruction banner, Confirm + Cancel buttons; `BottomSheet` uses CSS `display:none` to preserve state while picking
+- Nearby radius reduced 500 m → **300 m** in both CatchBusMode and PlanTripMode
+- Distance color-coding in plan results: green ≤300 m, amber 300–600 m, red >600 m + "(lejos)"
+- ReportButton now has ✕ close button
+- `MapView.tsx`: added `CenterTracker` component (tracks map center on `moveend`/`zoomend` via `useMapEvents`)
+
+**Geometry-based trip planner (backend rewrite):**
+- `getPlanRoutes` completely rewritten — searches by route geometry proximity, not stop proximity
+- `haversineKm()` and `minDistToGeometry()` helpers in `routeController.ts`
+- `ORIGIN_THRESHOLD_KM = 0.25` (250 m), `DEST_THRESHOLD_KM = 0.45` (450 m)
+- Direction check: destination must appear after origin index along the polyline
+- Fallback to stop-based (0.8 km) for routes without geometry
+- Fixes "999 m boarding distance" issue — origin distance now always ≤ 250 m for geometry-matched routes
+
+**Docker:**
+- `web/Dockerfile.dev` — Node.js 20 Alpine, runs `npm run dev` (replaces nginx multi-stage that caused `npm: not found`)
+- `docker-compose.yml` uses `dockerfile: Dockerfile.dev` for web service
+
 ### Phase 4 — Future
-- React Native mobile app
+- React Native mobile app (early stage in `mobile/`)
 - Firebase push notifications
 - Google Play + App Store
 - Alliance with AMB and SIBUS Barranquilla

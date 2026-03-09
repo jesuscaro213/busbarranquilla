@@ -53,22 +53,32 @@ interface Props {
   onBoardRoute?: (routeId: number, destinationStopId?: number) => void;
 }
 
+const GEOAPIFY_KEY = '5ccd06229fa54e23ad29c21a62e545d4';
+// Barranquilla metropolitan area bounding box: south,west,north,east
+// Covers Barranquilla + Soledad + Malambo + Puerto Colombia + Galapa
+const BQ_BBOX = { south: 10.82, west: -74.98, north: 11.08, east: -74.62 };
+// Bias center: Barranquilla downtown
+const BQ_CENTER = { lat: 10.9878, lng: -74.7889 };
+
+// Returns true if coordinates are within the metro area bounding box
+function isInMetroArea(lat: number, lng: number): boolean {
+  return lat >= BQ_BBOX.south && lat <= BQ_BBOX.north
+    && lng >= BQ_BBOX.west && lng <= BQ_BBOX.east;
+}
+
 // Reverse geocode a coordinate to a human-readable label
 async function reverseGeocode(lat: number, lng: number): Promise<string> {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=es&zoom=18`;
-    const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+    const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&lang=es&apiKey=${GEOAPIFY_KEY}`;
+    const res = await fetch(url);
     const data = await res.json();
-    if (data.display_name) {
-      // Return road + suburb if available, else first part
-      const parts = data.display_name.split(',');
-      return parts.slice(0, 2).join(',').trim();
-    }
+    const name = data.features?.[0]?.properties?.formatted as string | undefined;
+    if (name) return name.split(',').slice(0, 2).join(',').trim();
   } catch { /* fall through */ }
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-// Expand Colombian address abbreviations so Nominatim can understand them
+// Expand Colombian address abbreviations
 function expandColombianAddress(query: string): string {
   return query
     .replace(/\bCra\.?\s*/gi, 'Carrera ')
@@ -81,13 +91,8 @@ function expandColombianAddress(query: string): string {
     .trim();
 }
 
-// Extract the main street fragment before the '#' (cross-street number)
-// "Carrera 59B #79-400" → "Carrera 59B"
-function mainStreet(query: string): string {
-  return query.replace(/#.*$/, '').trim();
-}
 
-// Return the index in a geometry array closest to the given coordinate
+// Return closest index in geometry array
 function findClosestIndex(geometry: [number, number][], lat: number, lng: number): number {
   let minDist = Infinity;
   let idx = 0;
@@ -98,46 +103,62 @@ function findClosestIndex(geometry: [number, number][], lat: number, lng: number
   return idx;
 }
 
-// Parse a Colombian address like "Cra. 59B #79-400" into its components.
-// Returns null if the input doesn't match the [Street] [N] #[Cross]-[Dist] pattern.
+// Normalize Colombian address separators:
+// "Cr 52 N 45-30" → "Cr 52 #45-30"  (N = número, common alternative to #)
+// "Cr 52 N 45"    → "Cr 52 #45"
+function normalizeAddressSeparator(input: string): string {
+  // Replace isolated "N" or "No" followed by digits with "#"
+  // but only when it follows a street identifier (not part of "Norte" in a name)
+  return input.replace(/\s+[Nn][oO]?\.\s*(\d)/g, ' #$1').replace(/\s+[Nn]\s+(\d)/g, ' #$1');
+}
+
+// Parse Colombian address "Cra. 59B #79-400" or "Cra 59B #79"
 function parseColombianAddress(input: string): {
   mainStreet: string;
   crossStreet: string;
   distance: number;
 } | null {
-  const normalized = expandColombianAddress(input);
-  // Match: <street-with-number> #<cross-number> - <distance>
-  const match = normalized.match(/^(.+?)\s*#\s*(\d+[A-Za-z]?)\s*-\s*(\d+)/i);
+  const withNorm = normalizeAddressSeparator(input);
+  const normalized = expandColombianAddress(withNorm);
+  // Distance part is optional: #Y-Z or just #Y
+  const match = normalized.match(/^(.+?)\s*#\s*(\d+[A-Za-z]?)(?:\s*-\s*(\d+))?/i);
   if (!match) return null;
-
   const main = match[1].trim();
   const crossNum = match[2].trim();
-  const distance = parseInt(match[3], 10);
-
+  const distance = match[3] ? parseInt(match[3], 10) : 0;
   const mainLower = main.toLowerCase();
-  let crossType: string;
-  if (mainLower.includes('carrera')) {
-    crossType = 'Calle';
-  } else if (mainLower.includes('calle')) {
-    crossType = 'Carrera';
-  } else {
-    // Diagonal / Transversal / Avenida — default Calle; geocodeInBarranquilla will try Carrera too
-    crossType = 'Calle';
-  }
-
+  const crossType = mainLower.includes('carrera') ? 'Calle'
+    : mainLower.includes('calle') ? 'Carrera'
+    : 'Calle';
   return { mainStreet: main, crossStreet: `${crossType} ${crossNum}`, distance };
 }
 
-// Query Overpass API for the node shared by two streets inside Barranquilla's bounding box.
+// Build a flexible regex for a Colombian street name in Overpass
+// "Carrera 52" → "(Carrera|Cra\.?|Kr\.?)\s*52"
+// "Calle 45"   → "(Calle|Cl\.?)\s*45"
+function streetOsmPattern(streetName: string): string {
+  const lower = streetName.toLowerCase();
+  const num = streetName.match(/\d+[A-Za-z]?$/)?.[0] ?? '';
+  if (lower.includes('carrera')) return `(Carrera|Cra\\.?|Kr\\.?)\\s*${num}`;
+  if (lower.includes('calle'))   return `(Calle|Cl\\.?)\\s*${num}`;
+  if (lower.includes('diagonal')) return `(Diagonal|Dg\\.?)\\s*${num}`;
+  if (lower.includes('transversal')) return `(Transversal|Tv\\.?)\\s*${num}`;
+  if (lower.includes('avenida')) return `(Avenida|Av\\.?)\\s*${num}`;
+  return streetName;
+}
+
+// Overpass intersection lookup for street crosses
 async function findIntersectionOverpass(
   main: string,
   cross: string,
 ): Promise<{ lat: number; lng: number } | null> {
-  const bbox = '10.85,-74.93,11.10,-74.70';
+  const bbox = `${BQ_BBOX.south},${BQ_BBOX.west},${BQ_BBOX.north},${BQ_BBOX.east}`;
+  const mainPat = streetOsmPattern(main);
+  const crossPat = streetOsmPattern(cross);
   const query =
     `[out:json][timeout:15];\n` +
-    `way["name"~"${main}",i](${bbox})->.a;\n` +
-    `way["name"~"${cross}",i](${bbox})->.b;\n` +
+    `way["name"~"${mainPat}",i](${bbox})->.a;\n` +
+    `way["name"~"${crossPat}",i](${bbox})->.b;\n` +
     `node(w.a)(w.b);\n` +
     `out;`;
   try {
@@ -150,22 +171,40 @@ async function findIntersectionOverpass(
     if (Array.isArray(data.elements) && data.elements.length > 0) {
       return { lat: data.elements[0].lat, lng: data.elements[0].lon };
     }
-  } catch { /* timeout or network error — fall through */ }
+  } catch { /* timeout or network error */ }
   return null;
 }
 
-// Search with multiple fallback strategies for Colombian addresses
-async function geocodeInBarranquilla(query: string): Promise<NominatimResult[]> {
-  const base = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=co&accept-language=es';
-  const viewbox = '&viewbox=-74.93,10.85,-74.70,11.10';
+// Returns true for strings that look like postal codes (all digits, 4-7 chars)
+function isPostalCode(s: string): boolean {
+  return /^\d{4,7}$/.test(s.trim());
+}
 
-  // 1. Overpass intersection lookup for "Street #Cross-Dist" format
+// Pick best neighborhood label from Photon/Geoapify properties, excluding postal codes
+function pickNeighborhood(p: any): string | null {
+  const candidates = [
+    p?.quarter,
+    p?.neighbourhood,
+    p?.suburb,
+    p?.district,
+    p?.county,
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'string' && !isPostalCode(c)) return c;
+  }
+  return null;
+}
+
+// Search with Photon → Geoapify fallback
+async function geocodeInBarranquilla(query: string): Promise<NominatimResult[]> {
+  // 1. Overpass for Colombian address format "Cra X #Y-Z" / "Cra X N Y"
   const parsed = parseColombianAddress(query);
   if (parsed) {
+    let crossLabel = parsed.crossStreet;
     let intersection = await findIntersectionOverpass(parsed.mainStreet, parsed.crossStreet);
 
-    // For ambiguous main types (Diagonal/Transversal/Avenida), also try alternate cross type
     if (!intersection) {
+      // Try swapping Calle ↔ Carrera for ambiguous main streets
       const mainLower = parsed.mainStreet.toLowerCase();
       const isAmbiguous = !mainLower.includes('carrera') && !mainLower.includes('calle');
       if (isAmbiguous) {
@@ -173,51 +212,131 @@ async function geocodeInBarranquilla(query: string): Promise<NominatimResult[]> 
           ? parsed.crossStreet.replace('Calle', 'Carrera')
           : parsed.crossStreet.replace('Carrera', 'Calle');
         intersection = await findIntersectionOverpass(parsed.mainStreet, altCross);
-        if (intersection) {
-          return [{
-            place_id: 0,
-            display_name: `${parsed.mainStreet} × ${altCross}`,
-            lat: String(intersection.lat),
-            lon: String(intersection.lng),
-          }];
-        }
+        if (intersection) crossLabel = altCross;
       }
     }
 
-    if (intersection) {
-      return [{
-        place_id: 0,
-        display_name: `${parsed.mainStreet} × ${parsed.crossStreet}`,
-        lat: String(intersection.lat),
-        lon: String(intersection.lng),
-      }];
-    }
-  }
+    if (intersection) return [{
+      place_id: 0,
+      display_name: `${parsed.mainStreet} × ${crossLabel}`,
+      lat: String(intersection.lat),
+      lon: String(intersection.lng),
+    }];
 
-  // 2–4. Nominatim fallback strategies
-  const expanded = expandColombianAddress(query);
-  const street = mainStreet(expanded);
-
-  const queries = [
-    expanded,
-    street,
-    expandColombianAddress(mainStreet(query)),
-  ].filter((q, i, arr) => q.length > 1 && arr.indexOf(q) === i);
-
-  const attempts: string[] = [];
-  for (const q of queries) {
-    attempts.push(`${base}${viewbox}&q=${encodeURIComponent(q + ', Barranquilla')}`);
-    attempts.push(`${base}&q=${encodeURIComponent(q + ', Barranquilla, Colombia')}`);
-  }
-
-  for (const url of attempts) {
+    // Overpass found nothing — try Geoapify with the intersection as text
+    const label = `${parsed.mainStreet} × ${parsed.crossStreet}`;
     try {
-      const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
-      const data: NominatimResult[] = await res.json();
-      if (data.length > 0) return data;
-    } catch { /* try next */ }
+      const geoText = `${parsed.mainStreet} con ${parsed.crossStreet}, Barranquilla, Colombia`;
+      const geoUrl = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(geoText)}&filter=countrycode:co&bias=proximity:${BQ_CENTER.lng},${BQ_CENTER.lat}&limit=1&lang=es&apiKey=${GEOAPIFY_KEY}`;
+      const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
+      const geoData = await geoRes.json();
+      if (Array.isArray(geoData.features) && geoData.features.length > 0) {
+        const p = geoData.features[0].properties;
+        return [{ place_id: 0, display_name: label, lat: String(p.lat), lon: String(p.lon) }];
+      }
+    } catch { /* fall through */ }
+
+    // Last resort — Photon with both street names (no # sign)
+    try {
+      const photonQ = `${parsed.mainStreet} ${parsed.crossStreet} Barranquilla`;
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(photonQ)}&lat=${BQ_CENTER.lat}&lon=${BQ_CENTER.lng}&limit=5&lang=es&bbox=${BQ_BBOX.west},${BQ_BBOX.south},${BQ_BBOX.east},${BQ_BBOX.north}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const data = await res.json();
+      if (Array.isArray(data.features) && data.features.length > 0) {
+        const useful = data.features.filter((f: any) =>
+          f.properties?.type !== 'city' && f.properties?.type !== 'state'
+          && f.properties?.name !== 'Barranquilla'
+        );
+        if (useful.length > 0) {
+          const f = useful[0];
+          return [{ place_id: 0, display_name: label, lat: String(f.geometry.coordinates[1]), lon: String(f.geometry.coordinates[0]) }];
+        }
+      }
+    } catch { /* fall through */ }
+
+    // Nothing found — return an empty list (better than garbage results)
+    return [];
   }
+
+  const searchQuery = expandColombianAddress(query);
+
+  // 2. Nominatim (OpenStreetMap official geocoder — bounded=1 strictly limits to viewbox)
+  // viewbox format: left,top,right,bottom  (west,north,east,south)
+  try {
+    const viewbox = `${BQ_BBOX.west},${BQ_BBOX.north},${BQ_BBOX.east},${BQ_BBOX.south}`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery + ', Barranquilla')}&format=jsonv2&limit=8&countrycodes=co&bounded=1&viewbox=${viewbox}&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { 'Accept-Language': 'es', 'User-Agent': 'MiBus/1.0 (mibus.co)' },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const results = data
+        .filter((r: any) => isInMetroArea(parseFloat(r.lat), parseFloat(r.lon)))
+        .map((r: any, i: number) => {
+          const addr = r.address ?? {};
+          const street = addr.road ?? addr.pedestrian ?? addr.path ?? '';
+          const houseNum = addr.house_number ? ` #${addr.house_number}` : '';
+          const neighborhood = addr.suburb ?? addr.neighbourhood ?? addr.quarter ?? addr.city_district ?? '';
+          const city = addr.city ?? addr.town ?? 'Barranquilla';
+          // Use display name of the place if it's a POI (not just a street)
+          const label = r.name && r.name !== street ? r.name : street;
+          return {
+            place_id: i,
+            display_name: [label + houseNum, neighborhood, city].filter(Boolean).join(', '),
+            lat: r.lat,
+            lon: r.lon,
+          };
+        });
+      if (results.length > 0) return deduplicateResults(results);
+    }
+  } catch { /* fall through to Geoapify */ }
+
+  // 3. Geoapify fallback — strict rect filter for metro area
+  try {
+    const rectFilter = `rect:${BQ_BBOX.west},${BQ_BBOX.south},${BQ_BBOX.east},${BQ_BBOX.north}`;
+    const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(searchQuery + ', Barranquilla, Colombia')}&filter=${rectFilter}&bias=proximity:${BQ_CENTER.lng},${BQ_CENTER.lat}&limit=8&lang=es&apiKey=${GEOAPIFY_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    if (Array.isArray(data.features) && data.features.length > 0) {
+      const results = data.features
+        .filter((f: any) => isInMetroArea(f.properties.lat, f.properties.lon))
+        .map((f: any, i: number) => {
+          const p = f.properties ?? {};
+          const streetPart = p.street
+            ? (p.housenumber ? `${p.street} #${p.housenumber}` : p.street)
+            : (p.name ?? '');
+          const neighborhood = pickNeighborhood(p);
+          const city = p.city ?? p.town ?? 'Barranquilla';
+          return {
+            place_id: i,
+            display_name: [streetPart || p.name, neighborhood, city]
+              .filter(Boolean).join(', ') || query,
+            lat: String(p.lat),
+            lon: String(p.lon),
+          };
+        });
+      if (results.length > 0) return deduplicateResults(results);
+    }
+  } catch { /* all strategies exhausted */ }
+
   return [];
+}
+
+// Remove duplicate display_names and city-only results from geocoder output
+function deduplicateResults(results: NominatimResult[]): NominatimResult[] {
+  const GARBAGE = new Set(['Barranquilla', 'Perímetro Urbano Barranquilla', 'Colombia']);
+  const seen = new Set<string>();
+  const out: NominatimResult[] = [];
+  for (const r of results) {
+    const name = r.display_name.trim();
+    if (GARBAGE.has(name)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(r);
+    if (out.length >= 4) break; // max 4 unique results
+  }
+  return out;
 }
 
 export default function PlanTripMode({
@@ -276,7 +395,7 @@ export default function PlanTripMode({
   // ── Fetch nearby routes ────────────────────────────────────────────────
   const fetchNearbyRoutes = (pos: { lat: number; lng: number }) => {
     setNearbyLoading(true);
-    routesApi.nearby(pos.lat, pos.lng, 0.5)
+    routesApi.nearby(pos.lat, pos.lng, 0.3)
       .then((res) => setNearbyRoutes(res.data.routes ?? []))
       .catch(() => {})
       .finally(() => setNearbyLoading(false));
@@ -709,18 +828,17 @@ export default function PlanTripMode({
             <button
               onClick={resetOriginToGps}
               title="Volver a mi GPS"
-              className="text-gray-400 hover:text-green-600 text-xs px-1.5 py-1"
+              className="text-gray-400 hover:text-green-600 text-xs px-2 py-1 rounded-lg hover:bg-green-50"
             >
-              📍
+              GPS
             </button>
           )}
           {onRequestMapPick && (
             <button
               onClick={() => onRequestMapPick('origin')}
-              title="Elegir en el mapa"
-              className="text-gray-400 hover:text-blue-600 text-xs px-1.5 py-1"
+              className="text-blue-600 text-xs px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 font-medium"
             >
-              🗺️
+              En mapa
             </button>
           )}
         </div>
@@ -776,10 +894,9 @@ export default function PlanTripMode({
           {onRequestMapPick && !destLabel && (
             <button
               onClick={() => onRequestMapPick('dest')}
-              title="Elegir en el mapa"
-              className="text-gray-400 hover:text-blue-600 text-xs px-1.5 py-1"
+              className="text-blue-600 text-xs px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 font-medium"
             >
-              🗺️
+              En mapa
             </button>
           )}
         </div>
@@ -856,12 +973,19 @@ export default function PlanTripMode({
                   {favorites.has(r.id) ? '⭐' : '☆'}
                 </button>
               </div>
-              <div className="flex items-center gap-3 text-xs text-gray-500 pl-0.5 flex-wrap">
-                {r.origin_distance_meters != null && (
-                  <span>🚶 {r.origin_distance_meters} m para subir</span>
-                )}
-                <span>🏁 {r.distance_meters} m al bajar</span>
-                {r.frequency_minutes && <span>🕐 Cada {r.frequency_minutes} min</span>}
+              <div className="flex items-center gap-3 text-xs pl-0.5 flex-wrap">
+                {r.origin_distance_meters != null && (() => {
+                  const d = r.origin_distance_meters;
+                  const cls = d <= 300 ? 'text-green-600' : d <= 600 ? 'text-amber-600' : 'text-red-500';
+                  const icon = d <= 300 ? '🚶' : d <= 600 ? '🚶' : '⚠️';
+                  return (
+                    <span className={`font-medium ${cls}`}>
+                      {icon} {d} m para subir{d > 600 ? ' (lejos)' : ''}
+                    </span>
+                  );
+                })()}
+                <span className="text-gray-500">🏁 {r.distance_meters} m al bajar</span>
+                {r.frequency_minutes && <span className="text-gray-500">🕐 Cada {r.frequency_minutes} min</span>}
                 {r.minutes_ago !== null && (
                   <span className="text-amber-600">📡 {r.minutes_ago} min</span>
                 )}

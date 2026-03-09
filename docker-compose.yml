@@ -56,17 +56,13 @@ services:
   web:
     build:
       context: ./web
-      dockerfile: Dockerfile
-      args:
-        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY}
+      dockerfile: Dockerfile.dev
     container_name: busbarranquilla_web
     environment:
       # El proxy de Vite reenvía /api/* a este host interno
       BACKEND_URL: http://backend:3000
-      VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY}
     ports:
       - "5173:5173"
-    command: npm run dev
     depends_on:
       backend:
         condition: service_healthy

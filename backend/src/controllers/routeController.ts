@@ -330,9 +330,30 @@ export const getActiveFeed = async (_req: Request, res: Response): Promise<void>
   }
 };
 
-/// Planificador de destino: rutas cuyas paradas estén a ≤1 km de destino
-// Si se proveen originLat/originLng, verifica que el bus pase por el origen
-// ANTES que por el destino (stop_order del origen < stop_order del destino).
+// Haversine distance in km between two lat/lng points
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Minimum distance in km from a point to any point along a polyline
+function minDistToGeometry(lat: number, lng: number, geometry: [number, number][]): { dist: number; idx: number } {
+  let dist = Infinity;
+  let idx = 0;
+  for (let i = 0; i < geometry.length; i++) {
+    const d = haversineKm(lat, lng, geometry[i][0], geometry[i][1]);
+    if (d < dist) { dist = d; idx = i; }
+  }
+  return { dist, idx };
+}
+
+// Planificador: busca rutas cuya GEOMETRÍA pase cerca del origen y del destino.
+// Mucho más preciso que buscar por paradas — el bus puede pasar a 50 m aunque
+// la parada más cercana esté a 800 m.
 export const getPlanRoutes = async (req: Request, res: Response): Promise<void> => {
   const { destLat, destLng, originLat, originLng } = req.query;
 
@@ -341,145 +362,156 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
     return;
   }
 
-  const lat = parseFloat(destLat as string);
-  const lng = parseFloat(destLng as string);
-
-  if (isNaN(lat) || isNaN(lng)) {
+  const dLat = parseFloat(destLat as string);
+  const dLng = parseFloat(destLng as string);
+  if (isNaN(dLat) || isNaN(dLng)) {
     res.status(400).json({ message: 'destLat y destLng deben ser números válidos' });
     return;
   }
 
   const oLat = originLat ? parseFloat(originLat as string) : null;
   const oLng = originLng ? parseFloat(originLng as string) : null;
-  const hasOrigin = oLat !== null && oLng !== null && !isNaN(oLat) && !isNaN(oLng);
+  const hasOrigin = oLat !== null && oLng !== null && !isNaN(oLat!) && !isNaN(oLng!);
+
+  // Thresholds: how close the route geometry must pass to each point
+  const ORIGIN_THRESHOLD_KM = 0.25;  // 250 m — route must pass within 250 m of origin
+  const DEST_THRESHOLD_KM   = 0.45;  // 450 m — route must pass within 450 m of destination
 
   try {
-    // When origin is provided, enforce directional constraint:
-    // First find the nearest stop to the origin, then among all stops near the destination
-    // only consider those with a higher stop_order (i.e. later in the route sequence).
-    // This is more robust than comparing just the two nearest stops, because the destination
-    // may have a closer stop that happens to be before the origin, but also a valid stop after it.
-    const query = hasOrigin
-      ? `WITH origin_stops AS (
-          SELECT DISTINCT ON (s.route_id)
-            s.route_id,
-            s.stop_order AS origin_order,
-            ROUND(
-              (6371 * acos(LEAST(1.0,
-                cos(radians($3)) * cos(radians(s.latitude)) *
-                cos(radians(s.longitude) - radians($4)) +
-                sin(radians($3)) * sin(radians(s.latitude))
-              )) * 1000)::numeric
-            ) AS origin_distance_meters
-          FROM stops s
-          JOIN routes r ON r.id = s.route_id AND r.is_active = true
-          WHERE (6371 * acos(LEAST(1.0,
-              cos(radians($3)) * cos(radians(s.latitude)) *
-              cos(radians(s.longitude) - radians($4)) +
-              sin(radians($3)) * sin(radians(s.latitude))
-            ))) <= 1.0
-          ORDER BY s.route_id,
-            (6371 * acos(LEAST(1.0, cos(radians($3)) * cos(radians(s.latitude)) *
-              cos(radians(s.longitude) - radians($4)) +
-              sin(radians($3)) * sin(radians(s.latitude))
-            ))) ASC
-        ),
-        dest_stops AS (
-          SELECT DISTINCT ON (s.route_id)
-            s.route_id,
-            s.name       AS nearest_stop_name,
-            s.latitude   AS nearest_stop_lat,
-            s.longitude  AS nearest_stop_lng,
-            s.stop_order AS dest_order,
-            ROUND(
-              (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
-                cos(radians(s.longitude) - radians($2)) +
-                sin(radians($1)) * sin(radians(s.latitude))
-              )) * 1000)::numeric
-            ) AS distance_meters
-          FROM stops s
-          JOIN routes r ON r.id = s.route_id AND r.is_active = true
-          JOIN origin_stops os ON os.route_id = s.route_id AND s.stop_order > os.origin_order
-          ORDER BY s.route_id,
-            (6371 * acos(LEAST(1.0, cos(radians($1)) * cos(radians(s.latitude)) *
-              cos(radians(s.longitude) - radians($2)) +
-              sin(radians($1)) * sin(radians(s.latitude))
-            ))) ASC
-        ),
-        last_reports AS (
-          SELECT DISTINCT ON (route_id)
-            route_id,
-            created_at AS last_report_at,
-            ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS minutes_ago
-          FROM reports
-          WHERE is_active = true
-          ORDER BY route_id, created_at DESC
-        )
-        SELECT
-          r.id, r.name, r.code,
-          COALESCE(c.name, r.company) AS company_name,
-          ds.nearest_stop_name, ds.nearest_stop_lat, ds.nearest_stop_lng,
-          ds.distance_meters,
-          os.origin_distance_meters,
-          (ds.dest_order - os.origin_order) AS stop_difference,
-          r.frequency_minutes,
-          lr.last_report_at,
-          lr.minutes_ago
-        FROM dest_stops ds
-        JOIN origin_stops os ON os.route_id = ds.route_id
-        JOIN routes r ON r.id = ds.route_id
-        LEFT JOIN companies c ON c.id = r.company_id
-        LEFT JOIN last_reports lr ON lr.route_id = r.id
-        WHERE ds.distance_meters <= 1000
-        ORDER BY (os.origin_distance_meters + (ds.dest_order - os.origin_order) * 500 + ds.distance_meters) ASC`
-      : `WITH nearest_stops AS (
-          SELECT DISTINCT ON (s.route_id)
-            s.route_id,
-            s.name AS nearest_stop_name,
-            s.latitude AS nearest_stop_lat,
-            s.longitude AS nearest_stop_lng,
-            ROUND(
-              (6371 * acos(LEAST(1, cos(radians($1)) * cos(radians(s.latitude)) *
-                cos(radians(s.longitude) - radians($2)) +
-                sin(radians($1)) * sin(radians(s.latitude))
-              )) * 1000)::numeric
-            ) AS distance_meters
-          FROM stops s
-          JOIN routes r ON r.id = s.route_id AND r.is_active = true
-          ORDER BY s.route_id,
-            (6371 * acos(LEAST(1, cos(radians($1)) * cos(radians(s.latitude)) *
-              cos(radians(s.longitude) - radians($2)) +
-              sin(radians($1)) * sin(radians(s.latitude))
-            ))) ASC
-        ),
-        last_reports AS (
-          SELECT DISTINCT ON (route_id)
-            route_id,
-            created_at AS last_report_at,
-            ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS minutes_ago
-          FROM reports
-          WHERE is_active = true
-          ORDER BY route_id, created_at DESC
-        )
-        SELECT
-          r.id, r.name, r.code,
-          COALESCE(c.name, r.company) AS company_name,
-          ns.nearest_stop_name, ns.nearest_stop_lat, ns.nearest_stop_lng,
-          ns.distance_meters,
-          r.frequency_minutes,
-          lr.last_report_at,
-          lr.minutes_ago
-        FROM nearest_stops ns
-        JOIN routes r ON r.id = ns.route_id
-        LEFT JOIN companies c ON c.id = r.company_id
-        LEFT JOIN last_reports lr ON lr.route_id = r.id
-        WHERE ns.distance_meters <= 1000
-        ORDER BY ns.distance_meters ASC`;
+    // Fetch all active routes with geometry and their stops + last report
+    const [routesRes, stopsRes, reportsRes] = await Promise.all([
+      pool.query<{
+        id: number; name: string; code: string; frequency_minutes: number | null;
+        company_name: string | null; geometry: [number, number][] | null;
+      }>(
+        `SELECT r.id, r.name, r.code, r.frequency_minutes,
+                COALESCE(c.name, r.company) AS company_name,
+                r.geometry
+         FROM routes r
+         LEFT JOIN companies c ON c.id = r.company_id
+         WHERE r.is_active = true`
+      ),
+      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number }>(
+        `SELECT id, route_id, name, latitude, longitude, stop_order
+         FROM stops ORDER BY route_id, stop_order`
+      ),
+      pool.query<{ route_id: number; last_report_at: string; minutes_ago: number }>(
+        `SELECT DISTINCT ON (route_id) route_id, created_at AS last_report_at,
+                ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60)::int AS minutes_ago
+         FROM reports WHERE is_active = true
+         ORDER BY route_id, created_at DESC`
+      ),
+    ]);
 
-    const params = hasOrigin ? [lat, lng, oLat, oLng] : [lat, lng];
-    const result = await pool.query(query, params);
+    // Index stops and reports by route_id
+    const stopsByRoute: Record<number, typeof stopsRes.rows> = {};
+    for (const s of stopsRes.rows) {
+      if (!stopsByRoute[s.route_id]) stopsByRoute[s.route_id] = [];
+      stopsByRoute[s.route_id].push(s);
+    }
+    const reportByRoute: Record<number, typeof reportsRes.rows[0]> = {};
+    for (const r of reportsRes.rows) reportByRoute[r.route_id] = r;
 
-    res.json({ routes: result.rows });
+    const results: any[] = [];
+
+    for (const route of routesRes.rows) {
+      const geometry = route.geometry;
+      const stops = stopsByRoute[route.id] ?? [];
+
+      let originDistKm: number;
+      let destDistKm: number;
+      let boardingStop: typeof stops[0] | null = null;
+      let alightingStop: typeof stops[0] | null = null;
+
+      if (geometry && geometry.length >= 2) {
+        // ── Geometry-based matching ──────────────────────────────────────────
+        const originPt = hasOrigin
+          ? minDistToGeometry(oLat!, oLng!, geometry)
+          : { dist: 0, idx: 0 };
+
+        if (hasOrigin && originPt.dist > ORIGIN_THRESHOLD_KM) continue;
+        originDistKm = originPt.dist;
+
+        // Check destination appears AFTER origin along the route
+        const searchFrom = hasOrigin ? originPt.idx + 1 : 0;
+        let minDest = Infinity;
+        let destIdx = -1;
+        for (let i = searchFrom; i < geometry.length; i++) {
+          const d = haversineKm(dLat, dLng, geometry[i][0], geometry[i][1]);
+          if (d < minDest) { minDest = d; destIdx = i; }
+        }
+        if (minDest > DEST_THRESHOLD_KM || destIdx === -1) continue;
+        destDistKm = minDest;
+
+        // Find nearest stop to origin (boarding) and destination (alighting)
+        if (stops.length > 0) {
+          let minO = Infinity, minD = Infinity;
+          for (const s of stops) {
+            const sLat = parseFloat(s.latitude), sLng = parseFloat(s.longitude);
+            if (hasOrigin) {
+              const d = haversineKm(oLat!, oLng!, sLat, sLng);
+              if (d < minO) { minO = d; boardingStop = s; }
+            }
+            const d2 = haversineKm(dLat, dLng, sLat, sLng);
+            if (d2 < minD) { minD = d2; alightingStop = s; }
+          }
+        }
+      } else {
+        // ── Fallback: stop-based for routes without geometry ─────────────────
+        if (stops.length === 0) continue;
+        let minO = Infinity, minD = Infinity;
+        let boardIdx = -1, alightIdx = -1;
+        for (let i = 0; i < stops.length; i++) {
+          const sLat = parseFloat(stops[i].latitude), sLng = parseFloat(stops[i].longitude);
+          if (hasOrigin) {
+            const d = haversineKm(oLat!, oLng!, sLat, sLng);
+            if (d < minO) { minO = d; boardIdx = i; }
+          }
+          const d2 = haversineKm(dLat, dLng, sLat, sLng);
+          if (d2 < minD) { minD = d2; alightIdx = i; }
+        }
+        if (hasOrigin && minO > 0.8) continue;           // no nearby origin stop
+        if (minD > 0.8) continue;                         // no nearby dest stop
+        if (hasOrigin && alightIdx <= boardIdx) continue; // wrong direction
+        originDistKm = minO;
+        destDistKm = minD;
+        boardingStop = boardIdx >= 0 ? stops[boardIdx] : null;
+        alightingStop = alightIdx >= 0 ? stops[alightIdx] : null;
+      }
+
+      const report = reportByRoute[route.id];
+      const originM = Math.round((hasOrigin ? originDistKm! : 0) * 1000);
+      const destM   = Math.round(
+        alightingStop
+          ? haversineKm(dLat, dLng, parseFloat(alightingStop.latitude), parseFloat(alightingStop.longitude)) * 1000
+          : destDistKm! * 1000
+      );
+
+      results.push({
+        id: route.id,
+        name: route.name,
+        code: route.code,
+        company_name: route.company_name,
+        nearest_stop_name: alightingStop?.name ?? '',
+        nearest_stop_lat:  alightingStop ? parseFloat(alightingStop.latitude)  : dLat,
+        nearest_stop_lng:  alightingStop ? parseFloat(alightingStop.longitude) : dLng,
+        distance_meters:   destM,
+        origin_distance_meters: hasOrigin ? originM : null,
+        stop_difference: null,
+        frequency_minutes: route.frequency_minutes,
+        last_report_at: report?.last_report_at ?? null,
+        minutes_ago:    report ? Number(report.minutes_ago) : null,
+        geometry: route.geometry,
+      });
+    }
+
+    // Sort: closest total (origin walk + dest walk)
+    results.sort((a, b) =>
+      ((a.origin_distance_meters ?? 0) + a.distance_meters) -
+      ((b.origin_distance_meters ?? 0) + b.distance_meters)
+    );
+
+    res.json({ routes: results });
 
   } catch (error) {
     console.error('Error obteniendo rutas para planificador:', error);

@@ -34,6 +34,7 @@ interface Report {
 
 interface Props {
   onMapClick?: (lat: number, lng: number) => void;
+  onCenterChange?: (lat: number, lng: number) => void;
   refreshTrigger?: number;
   onUserLocation?: (lat: number, lng: number) => void;
   destinationCenter?: { lat: number; lng: number } | null;
@@ -211,6 +212,20 @@ function ClickHandler({ onMapClick }: { onMapClick?: (lat: number, lng: number) 
   useMapEvents({
     click(e) {
       onMapClick?.(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+function CenterTracker({ onCenterChange }: { onCenterChange?: (lat: number, lng: number) => void }) {
+  const map = useMapEvents({
+    moveend() {
+      const c = map.getCenter();
+      onCenterChange?.(c.lat, c.lng);
+    },
+    zoomend() {
+      const c = map.getCenter();
+      onCenterChange?.(c.lat, c.lng);
     },
   });
   return null;
@@ -598,6 +613,7 @@ const FILTER_LABELS: Record<RouteFilter, string> = {
 
 export default function MapView({
   onMapClick,
+  onCenterChange,
   refreshTrigger,
   onUserLocation,
   destinationCenter,
@@ -655,6 +671,7 @@ export default function MapView({
       />
 
       <ClickHandler onMapClick={onMapClick} />
+      <CenterTracker onCenterChange={onCenterChange} />
       <UserLocationTracker onUserLocation={onUserLocation} gpsEnabled={gpsEnabled} />
       <BusTracker />
       <MapFlyTo center={destinationCenter} />

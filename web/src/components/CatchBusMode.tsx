@@ -248,7 +248,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
 
   const fetchNearbyRoutes = (pos: [number, number]) => {
     setNearbyLoading(true);
-    routesApi.nearby(pos[0], pos[1], 0.5)
+    routesApi.nearby(pos[0], pos[1], 0.3)
       .then(async (res) => {
         const routes: Route[] = res.data.routes ?? [];
         setNearbyRoutes(routes);

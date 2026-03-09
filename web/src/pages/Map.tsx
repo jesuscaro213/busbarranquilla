@@ -101,6 +101,7 @@ export default function Map() {
   const [mapPickMode, setMapPickMode] = useState<'none' | 'origin' | 'dest'>('none');
   const [mapPickedOrigin, setMapPickedOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [mapPickedDest, setMapPickedDest] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 10.9685, lng: -74.7813 });
 
   // ── Credits popup: close on outside click ─────────────────────────────────
   useEffect(() => {
@@ -480,6 +481,7 @@ export default function Map() {
       {/* Map — full size */}
       <MapView
         onMapClick={handleMapClick}
+        onCenterChange={(lat, lng) => setMapCenter({ lat, lng })}
         refreshTrigger={refreshTrigger}
         onUserLocation={(lat, lng) => setUserPosition([lat, lng])}
         destinationCenter={destinationCenter}
@@ -556,35 +558,84 @@ export default function Map() {
         </div>
       )}
 
-      {/* ── Map pick mode banner ──────────────────────────────────────────── */}
+      {/* ── Map pick mode overlay ─────────────────────────────────────────── */}
       {mapPickMode !== 'none' && (
-        <div className="absolute top-16 left-0 right-0 z-[1100] flex justify-center px-4 pointer-events-none">
-          <div className="bg-blue-600 text-white rounded-2xl px-4 py-3 shadow-xl flex items-center gap-3 pointer-events-auto">
-            <span className="text-sm font-semibold">
-              📌 Toca el mapa para elegir tu {mapPickMode === 'dest' ? 'destino' : 'origen'}
-            </span>
+        <>
+          {/* Crosshair fijo en el centro del mapa */}
+          <div className="absolute inset-0 z-[1050] pointer-events-none flex items-center justify-center">
+            <div className="relative flex items-center justify-center">
+              {/* Sombra / halo */}
+              <div className="absolute w-10 h-10 rounded-full bg-blue-500/20 animate-ping" />
+              {/* Pin */}
+              <div className="relative z-10 flex flex-col items-center" style={{ marginBottom: 28 }}>
+                <div className="w-6 h-6 rounded-full bg-blue-600 border-2 border-white shadow-lg flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+                {/* Cola del pin */}
+                <div className="w-0.5 h-5 bg-blue-600" />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-600/40" />
+              </div>
+            </div>
+          </div>
+
+          {/* Instrucción arriba */}
+          <div className="absolute top-16 left-4 right-4 z-[1100] flex justify-center pointer-events-none">
+            <div className="bg-gray-900/85 backdrop-blur-sm text-white rounded-2xl px-4 py-2.5 shadow-xl flex items-center gap-2">
+              <span className="text-sm font-medium">
+                Mueve el mapa para posicionar el {mapPickMode === 'dest' ? 'destino' : 'origen'}
+              </span>
+            </div>
+          </div>
+
+          {/* Botones Confirmar + Cancelar abajo */}
+          <div className="absolute bottom-6 left-4 right-4 z-[1100] flex gap-3">
             <button
               onClick={() => { setMapPickMode('none'); setSheetState('middle'); }}
-              className="text-blue-200 hover:text-white text-base leading-none"
+              className="flex-1 h-12 bg-white border border-gray-200 text-gray-700 font-semibold rounded-2xl text-sm shadow-lg"
             >
-              ✕
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                if (mapPickMode === 'dest') {
+                  setMapPickedDest(mapCenter);
+                  setMapPickedOrigin(null);
+                } else {
+                  setMapPickedOrigin(mapCenter);
+                  setMapPickedDest(null);
+                }
+                setMapPickMode('none');
+                setSheetState('middle');
+              }}
+              className="flex-[2] h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl text-sm shadow-lg"
+            >
+              Confirmar ubicación
             </button>
           </div>
-        </div>
+        </>
       )}
 
       {/* ── Report button (above sheet) ────────────────────────────────────── */}
       {user && clickedPos && !isOnTrip && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[1060]">
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[1060] flex flex-col items-center gap-2">
           <ReportButton lat={clickedPos.lat} lng={clickedPos.lng} onReported={handleReported} />
+          <button
+            onClick={() => setClickedPos(null)}
+            className="bg-white/90 backdrop-blur-sm text-gray-500 hover:text-gray-800 text-xs px-3 py-1 rounded-full shadow border border-gray-200"
+          >
+            ✕ Cerrar
+          </button>
         </div>
       )}
 
       {/* ── Bottom sheet (auth only) ───────────────────────────────────────── */}
+      {/* Hidden via CSS during map pick to preserve PlanTripMode state */}
       {user && (
-        <BottomSheet state={sheetState} onStateChange={setSheetState} actions={actionsBar}>
-          {renderSheetContent()}
-        </BottomSheet>
+        <div className={mapPickMode !== 'none' ? 'hidden' : ''}>
+          <BottomSheet state={sheetState} onStateChange={setSheetState} actions={actionsBar}>
+            {renderSheetContent()}
+          </BottomSheet>
+        </div>
       )}
 
       {/* ── CTA for non-auth ──────────────────────────────────────────────── */}

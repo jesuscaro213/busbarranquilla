@@ -65,6 +65,16 @@ const USER_ICON = L.divIcon({
   iconAnchor: [12, 12],
 });
 
+const USER_ON_BUS_ICON = L.divIcon({
+  html: `<div style="position:relative;width:36px;height:36px">
+    <div class="animate-ping" style="position:absolute;inset:0;background:#16a34a;border-radius:50%;opacity:0.3"></div>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:22px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))">🚌</div>
+  </div>`,
+  className: '',
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+});
+
 const BUS_ICON = L.divIcon({
   html: '<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4))">🚍</div>',
   className: '',
@@ -235,13 +245,22 @@ function CenterTracker({ onCenterChange }: { onCenterChange?: (lat: number, lng:
 function UserLocationTracker({
   onUserLocation,
   gpsEnabled,
+  isOnTrip,
 }: {
   onUserLocation?: (lat: number, lng: number) => void;
   gpsEnabled: boolean;
+  isOnTrip: boolean;
 }) {
   const map = useMap();
   const markerRef = useRef<L.Marker | null>(null);
   const watchIdRef = useRef<number | null>(null);
+
+  // Cambiar icono cuando el usuario sube o baja del bus
+  useEffect(() => {
+    if (!markerRef.current) return;
+    markerRef.current.setIcon(isOnTrip ? USER_ON_BUS_ICON : USER_ICON);
+    markerRef.current.setPopupContent(isOnTrip ? '🚌 Estás en el bus' : 'Tú estás aquí');
+  }, [isOnTrip]);
 
   useEffect(() => {
     if (!gpsEnabled) return;
@@ -253,9 +272,9 @@ function UserLocationTracker({
         onUserLocation?.(latitude, longitude);
 
         if (!markerRef.current) {
-          markerRef.current = L.marker([latitude, longitude], { icon: USER_ICON })
+          markerRef.current = L.marker([latitude, longitude], { icon: isOnTrip ? USER_ON_BUS_ICON : USER_ICON })
             .addTo(map)
-            .bindPopup('Tú estás aquí');
+            .bindPopup(isOnTrip ? '🚌 Estás en el bus' : 'Tú estás aquí');
         } else {
           markerRef.current.setLatLng([latitude, longitude]);
         }
@@ -672,7 +691,7 @@ export default function MapView({
 
       <ClickHandler onMapClick={onMapClick} />
       <CenterTracker onCenterChange={onCenterChange} />
-      <UserLocationTracker onUserLocation={onUserLocation} gpsEnabled={gpsEnabled} />
+      <UserLocationTracker onUserLocation={onUserLocation} gpsEnabled={gpsEnabled} isOnTrip={!!activeTripGeometry} />
       <BusTracker />
       <MapFlyTo center={destinationCenter} />
       {/* All-routes layer — always behind specific layers */}

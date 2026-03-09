@@ -110,6 +110,19 @@ export const routesApi = {
     api.get('/api/admin/buses'),
 };
 
+// ─── Route Update Alerts ──────────────────────────────────────────────────────
+
+export const routeAlertsApi = {
+  getAlerts: () =>
+    api.get('/api/routes/update-alerts'),
+
+  getAlertsCount: () =>
+    api.get('/api/routes/update-alerts/count'),
+
+  dismissAlert: (routeId: number) =>
+    api.patch(`/api/routes/${routeId}/dismiss-alert`),
+};
+
 // ─── Stops ───────────────────────────────────────────────────────────────────
 
 export const stopsApi = {

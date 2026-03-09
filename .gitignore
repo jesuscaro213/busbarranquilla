@@ -18,5 +18,8 @@ backend/dist/
 web/dist/
 mobile/.expo/
 
+# Flutter app — se maneja en la rama feature/flutter-app
+flutter_app/
+
 # Sistema
 .DS_Store

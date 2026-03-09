@@ -239,6 +239,30 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla payments creada');
 
+    // Tabla de reportes de ruta desactualizada (usuarios detectan que el bus tomó otro camino)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS route_update_reports (
+        id SERIAL PRIMARY KEY,
+        route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+        user_id  INTEGER NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+        tipo     VARCHAR(20) NOT NULL CHECK (tipo IN ('trancon', 'ruta_real')),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(route_id, user_id)
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_route_update_reports_route_id
+        ON route_update_reports(route_id)
+    `);
+    console.log('✅ Tabla route_update_reports creada');
+
+    // Columna para marcar cuándo el admin revisó la alerta de ruta desactualizada
+    await pool.query(`
+      ALTER TABLE routes
+        ADD COLUMN IF NOT EXISTS route_alert_reviewed_at TIMESTAMPTZ DEFAULT NULL
+    `);
+    console.log('✅ Columna route_alert_reviewed_at en routes');
+
     // Cerrar viajes zombie (activos por más de 4 horas sin actualización de ubicación)
     const zombieClosed = await pool.query(`
       UPDATE active_trips

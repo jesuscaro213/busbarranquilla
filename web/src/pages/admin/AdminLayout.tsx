@@ -1,17 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { routeAlertsApi } from '../../services/api';
 
 const navItems = [
   { to: '/admin/users', label: 'Usuarios', emoji: '👥' },
   { to: '/admin/buses', label: 'Buses', emoji: '🚍' },
   { to: '/admin/transmetro', label: 'Transmetro', emoji: '🚇' },
   { to: '/admin/companies', label: 'Empresas', emoji: '🏢' },
+  { to: '/admin/route-alerts', label: 'Alertas de rutas', emoji: '⚠️', badge: true },
 ];
 
 export default function AdminLayout() {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [alertsCount, setAlertsCount] = useState(0);
+
+  useEffect(() => {
+    routeAlertsApi.getAlertsCount()
+      .then(res => setAlertsCount(res.data.count ?? 0))
+      .catch(() => {});
+    const interval = setInterval(() => {
+      routeAlertsApi.getAlertsCount()
+        .then(res => setAlertsCount(res.data.count ?? 0))
+        .catch(() => {});
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="flex h-screen">
@@ -23,7 +38,7 @@ export default function AdminLayout() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map(({ to, label, emoji }) => (
+          {navItems.map(({ to, label, emoji, badge }) => (
             <NavLink
               key={to}
               to={to}
@@ -36,7 +51,12 @@ export default function AdminLayout() {
               }
             >
               <span>{emoji}</span>
-              {label}
+              <span className="flex-1">{label}</span>
+              {badge && alertsCount > 0 && (
+                <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                  {alertsCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -78,7 +98,7 @@ export default function AdminLayout() {
         {/* ── Mobile dropdown menu ── */}
         {menuOpen && (
           <nav className="md:hidden bg-gray-800 text-gray-100 px-4 py-3 space-y-1 shrink-0">
-            {navItems.map(({ to, label, emoji }) => (
+            {navItems.map(({ to, label, emoji, badge }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -92,7 +112,12 @@ export default function AdminLayout() {
                 }
               >
                 <span>{emoji}</span>
-                {label}
+                <span className="flex-1">{label}</span>
+                {badge && alertsCount > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                    {alertsCount}
+                  </span>
+                )}
               </NavLink>
             ))}
             <div className="border-t border-gray-700 pt-3 mt-1 space-y-2">

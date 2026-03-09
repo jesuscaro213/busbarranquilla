@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import { awardCredits } from './creditController';
 import { getIo } from '../config/socket';
+import { getRedisClient } from '../config/redis';
 
 const VALID_TYPES = [
   'bus_location', 'traffic', 'bus_full', 'no_service', 'detour',
@@ -24,6 +25,10 @@ const CREDITS_BY_TYPE: Record<string, number> = {
 };
 
 const OCCUPANCY_TYPES: string[] = ['lleno', 'bus_disponible'];
+const REPORT_RATE_LIMIT_PER_HOUR = 5;
+const REPORT_ROUTE_TYPE_LIMIT_PER_HOUR = 2;
+const REPORT_RATE_LIMIT_TTL_SECONDS = 3600;
+const REPORT_RATE_LIMIT_MESSAGE = 'Límite de reportes alcanzado. Espera antes de reportar de nuevo.';
 // Distancia máxima a parada más cercana para reportes válidos
 const GEO_MAX_METERS: Record<string, number> = {
   lleno: 300,
@@ -101,6 +106,9 @@ async function computeOccupancy(routeId: number): Promise<{
 export const createReport = async (req: Request, res: Response): Promise<void> => {
   const { route_id, type, latitude, longitude, description } = req.body;
   const userId = (req as any).userId;
+  let globalRateKey: string | null = null;
+  let routeTypeRateKey: string | null = null;
+  let reportCreated = false;
 
   if (!type || latitude === undefined || longitude === undefined) {
     res.status(400).json({ message: 'type, latitude y longitude son obligatorios' });
@@ -167,6 +175,32 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
       }
     }
 
+    // ── Rate limit por usuario y por tipo/ruta usando Redis ───────────────
+    const redis = await getRedisClient();
+    if (redis) {
+      globalRateKey = `rate:report:${userId}`;
+      const globalCount = await redis.incr(globalRateKey);
+      await redis.expire(globalRateKey, REPORT_RATE_LIMIT_TTL_SECONDS, 'NX');
+
+      if (globalCount > REPORT_RATE_LIMIT_PER_HOUR) {
+        await redis.decr(globalRateKey);
+        res.status(429).json({ message: REPORT_RATE_LIMIT_MESSAGE });
+        return;
+      }
+
+      if (route_id) {
+        routeTypeRateKey = `rate:report:${userId}:${route_id}:${type}`;
+        const routeTypeCount = await redis.incr(routeTypeRateKey);
+        await redis.expire(routeTypeRateKey, REPORT_RATE_LIMIT_TTL_SECONDS, 'NX');
+
+        if (routeTypeCount > REPORT_ROUTE_TYPE_LIMIT_PER_HOUR) {
+          await redis.multi().decr(globalRateKey).decr(routeTypeRateKey).exec();
+          res.status(429).json({ message: REPORT_RATE_LIMIT_MESSAGE });
+          return;
+        }
+      }
+    }
+
     // ── Calcular créditos y si se otorgan ahora ───────────────────────────
     let creditsEarned = 0;
     let creditsAwardedToReporter = false;
@@ -196,6 +230,7 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
     );
 
     const report = result.rows[0];
+    reportCreated = true;
 
     // ── Emitir evento en tiempo real a los demás usuarios de la ruta ─────
     if (route_id) {
@@ -218,6 +253,15 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
     });
 
   } catch (error) {
+    if (!reportCreated && globalRateKey) {
+      const redis = await getRedisClient();
+      if (redis) {
+        await redis.decr(globalRateKey).catch(() => {});
+        if (routeTypeRateKey) {
+          await redis.decr(routeTypeRateKey).catch(() => {});
+        }
+      }
+    }
     console.error('Error creando reporte:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }

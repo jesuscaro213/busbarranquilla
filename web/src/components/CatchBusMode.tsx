@@ -92,6 +92,7 @@ const OCCUPANCY_STATE_LABEL: Record<string, { emoji: string; label: string; colo
   lleno:      { emoji: '🔴', label: 'Bus lleno',  color: 'bg-red-100 text-red-700 border-red-200' },
   disponible: { emoji: '🟢', label: 'Hay sillas', color: 'bg-green-100 text-green-700 border-green-200' },
 };
+const REPORT_RATE_LIMIT_TOAST = 'Ya reportaste mucho hoy en esta ruta 🙏';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -837,7 +838,11 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         occupancyReportRef.current = (res.data.report as { id: number })?.id ?? null;
       }
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string; retry_in_minutes?: number } } };
+      const e = err as { response?: { status?: number; data?: { message?: string; retry_in_minutes?: number } } };
+      if (e?.response?.status === 429) {
+        showToast(REPORT_RATE_LIMIT_TOAST);
+        return;
+      }
       const msg = e?.response?.data?.message;
       const retryIn = e?.response?.data?.retry_in_minutes;
       if (retryIn) {
@@ -876,7 +881,12 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         longitude: pos[1],
       });
       showToast(`⚡ +${credits} créditos`);
-    } catch {
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number } };
+      if (e?.response?.status === 429) {
+        showToast(REPORT_RATE_LIMIT_TOAST);
+        return;
+      }
       showToast('Error al enviar el reporte');
     }
   };
@@ -1041,8 +1051,14 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
                       type: 'desvio',
                       latitude: pos[0],
                       longitude: pos[1],
-                    }).catch(() => {});
-                    showToast('⚡ +4 créditos — Desvío reportado');
+                    }).then(() => {
+                      showToast('⚡ +4 créditos — Desvío reportado');
+                    }).catch((err: unknown) => {
+                      const e = err as { response?: { status?: number } };
+                      if (e?.response?.status === 429) {
+                        showToast(REPORT_RATE_LIMIT_TOAST);
+                      }
+                    });
                   }
                   setDeviationAlert(false);
                 }}

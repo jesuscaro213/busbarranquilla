@@ -1,15 +1,37 @@
 import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useGoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
+  const googleEnabled = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const onGoogleClick = useGoogleLogin({
+    scope: 'openid email profile',
+    onSuccess: async (tokenResponse) => {
+      setError('');
+      setLoading(true);
+      try {
+        await googleLogin(tokenResponse.access_token);
+        navigate('/');
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        setError(msg || 'No se pudo iniciar sesión con Google');
+      } finally {
+        setLoading(false);
+      }
+    },
+    onError: () => {
+      setError('No se pudo iniciar sesión con Google');
+    },
+  });
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -77,6 +99,15 @@ export default function Login() {
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition-colors"
           >
             {loading ? 'Entrando…' : 'Iniciar sesión'}
+          </button>
+
+          <button
+            type="button"
+            disabled={loading || !googleEnabled}
+            onClick={() => onGoogleClick()}
+            className="w-full border border-gray-300 hover:bg-gray-50 disabled:opacity-60 text-gray-700 font-semibold py-2.5 rounded-lg transition-colors"
+          >
+            Continuar con Google
           </button>
         </form>
 

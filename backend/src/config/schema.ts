@@ -125,6 +125,7 @@ const createTables = async () => {
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
     `);
+    await pool.query(`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`);
     await pool.query(`
       ALTER TABLE routes
         ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL

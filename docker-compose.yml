@@ -36,6 +36,8 @@ services:
       WOMPI_PRIVATE_KEY: ${WOMPI_PRIVATE_KEY:-prv_test_TVTQPaoE7Vse3lyPS8ZAEWOAzPIRZjfD}
       WOMPI_EVENT_SECRET: ${WOMPI_EVENT_SECRET:-test_events_Uf6Kl5MqSaU85sk5oi2Cg0SCfqVNcJhH}
       APP_URL: ${APP_URL:-http://localhost:5173}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     ports:
       - "3000:3000"
     command: npm run dev
@@ -61,6 +63,7 @@ services:
     environment:
       # El proxy de Vite reenvía /api/* a este host interno
       BACKEND_URL: http://backend:3000
+      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
       - "5173:5173"
     depends_on:

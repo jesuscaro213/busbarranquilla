@@ -17,6 +17,7 @@ import userRoutes from './routes/userRoutes';
 import traceRoutes from './routes/traceRoutes';
 import suggestionRoutes from './routes/suggestionRoutes';
 import paymentRoutes from './routes/paymentRoutes';
+import { getRedisClient } from './config/redis';
 
 dotenv.config();
 
@@ -80,6 +81,7 @@ httpServer.listen(PORT, async () => {
   try {
     await pool.query('SELECT NOW()');
     await createTables();
+    await getRedisClient();
   } catch (error) {
     console.log('Base de datos no conectada aún');
   }

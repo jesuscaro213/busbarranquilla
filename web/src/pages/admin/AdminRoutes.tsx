@@ -472,6 +472,31 @@ export default function AdminRoutes() {
     setStops(prev => prev.filter(s => s.id !== id));
   }
 
+  // ── Waypoint helpers ───────────────────────────────────────────────────────
+
+  function extractWaypoints(geometry: [number, number][], targetCount = 12): [number, number][] {
+    if (geometry.length <= targetCount) return [...geometry];
+    const result: [number, number][] = [];
+    const step = (geometry.length - 1) / (targetCount - 1);
+    for (let i = 0; i < targetCount; i++) {
+      result.push(geometry[Math.round(i * step)]);
+    }
+    return result;
+  }
+
+  const snapAndUpdate = useCallback(async (wpts: [number, number][]) => {
+    setSnapping(true);
+    try {
+      const res = await routesApi.snapWaypoints(wpts);
+      setCustomGeometry(res.data.geometry as [number, number][]);
+    } catch {
+      // Fallback: usar los waypoints directamente si OSRM falla
+      setCustomGeometry(wpts);
+    } finally {
+      setSnapping(false);
+    }
+  }, []);
+
   // ── Map initialization ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -899,31 +924,6 @@ export default function AdminRoutes() {
       setScanLoading(false);
     }
   }
-
-  // ── Waypoint helpers ───────────────────────────────────────────────────────
-
-  function extractWaypoints(geometry: [number, number][], targetCount = 12): [number, number][] {
-    if (geometry.length <= targetCount) return [...geometry];
-    const result: [number, number][] = [];
-    const step = (geometry.length - 1) / (targetCount - 1);
-    for (let i = 0; i < targetCount; i++) {
-      result.push(geometry[Math.round(i * step)]);
-    }
-    return result;
-  }
-
-  const snapAndUpdate = useCallback(async (wpts: [number, number][]) => {
-    setSnapping(true);
-    try {
-      const res = await routesApi.snapWaypoints(wpts);
-      setCustomGeometry(res.data.geometry as [number, number][]);
-    } catch {
-      // Fallback: usar los waypoints directamente si OSRM falla
-      setCustomGeometry(wpts);
-    } finally {
-      setSnapping(false);
-    }
-  }, []);
 
   // ── Regenerate geometry ────────────────────────────────────────────────────
 

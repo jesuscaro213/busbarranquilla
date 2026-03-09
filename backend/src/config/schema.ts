@@ -125,6 +125,10 @@ const createTables = async () => {
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
     `);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_report_date DATE DEFAULT NULL`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS report_streak INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(10) UNIQUE DEFAULT NULL`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER REFERENCES users(id) ON DELETE SET NULL`);
     await pool.query(`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`);
     await pool.query(`
       ALTER TABLE routes

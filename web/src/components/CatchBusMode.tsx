@@ -891,6 +891,48 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     }
   };
 
+  const handleShareBus = async () => {
+    if (!activeTrip?.route_id) return;
+
+    const routeCode = activeTrip.route_code ?? '—';
+    const routeName = activeTrip.route_name ?? 'MiBus';
+    const shareUrl = `https://mibus.co/bus/${activeTrip.route_id}`;
+    const shareText = `🚌 Voy en el bus ${routeCode} (${routeName}). Súbete en mibus.co`;
+    const fullShareText = `${shareText} ${shareUrl}`;
+    const copyShareText = async (): Promise<boolean> => {
+      if (typeof window === 'undefined' || !window.navigator?.clipboard) return false;
+      await window.navigator.clipboard.writeText(fullShareText);
+      return true;
+    };
+
+    try {
+      if (typeof navigator !== 'undefined' && 'share' in navigator) {
+        await (navigator as Navigator & { share: (data: { title: string; text: string; url: string }) => Promise<void> }).share({
+          title: 'MiBus',
+          text: shareText,
+          url: shareUrl,
+        });
+        return;
+      }
+
+      if (await copyShareText()) {
+        showToast('¡Enlace copiado!');
+        return;
+      }
+    } catch {
+      try {
+        if (await copyShareText()) {
+          showToast('¡Enlace copiado!');
+          return;
+        }
+      } catch {
+        // noop
+      }
+    }
+
+    showToast('No se pudo compartir en este dispositivo');
+  };
+
   // ── ETA calculation ───────────────────────────────────────────────────
   const computeEta = (): number | null => {
     const pos = userPositionRef.current;
@@ -1231,6 +1273,13 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         </div>
 
         {/* ── End trip ── */}
+        <button
+          onClick={handleShareBus}
+          className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold py-2.5 rounded-xl text-sm transition-colors"
+        >
+          📤 Compartir este bus
+        </button>
+
         <button
           onClick={() => setShowEndConfirm(true)}
           className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl text-sm transition-colors"

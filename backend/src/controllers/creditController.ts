@@ -72,6 +72,50 @@ export const getHistory = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
+// Estadísticas del usuario para perfil (protegido)
+export const getStats = async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as any).userId as number;
+
+  try {
+    const [tripsRes, reportsRes, creditsRes, streakRes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS total_trips
+         FROM active_trips
+         WHERE user_id = $1 AND ended_at IS NOT NULL`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total_reports
+         FROM reports
+         WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::int AS credits_earned
+         FROM credit_transactions
+         WHERE user_id = $1 AND amount > 0`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COALESCE(report_streak, 0)::int AS report_streak
+         FROM users
+         WHERE id = $1`,
+        [userId]
+      ),
+    ]);
+
+    res.json({
+      total_trips: tripsRes.rows[0]?.total_trips ?? 0,
+      total_reports: reportsRes.rows[0]?.total_reports ?? 0,
+      credits_earned: creditsRes.rows[0]?.credits_earned ?? 0,
+      report_streak: streakRes.rows[0]?.report_streak ?? 0,
+    });
+  } catch (error) {
+    console.error('Error obteniendo estadísticas:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Gastar créditos en una función (protegido)
 export const spendCredits = async (req: Request, res: Response): Promise<void> => {
   const { amount, feature, description } = req.body;

@@ -50,7 +50,12 @@ export default function Navbar() {
                   ⚙️ Administración
                 </Link>
               )}
-              <span className="text-blue-200">{user.name}</span>
+              <Link to="/profile" className="flex items-center gap-2 text-blue-200 hover:text-white transition-colors">
+                <span className="w-7 h-7 rounded-full bg-blue-700 text-xs font-bold flex items-center justify-center">
+                  {user.name.charAt(0).toUpperCase()}
+                </span>
+                <span>{user.name}</span>
+              </Link>
               <button onClick={handleLogout} className="text-blue-300 hover:text-white transition-colors">
                 Salir
               </button>
@@ -114,6 +119,9 @@ export default function Navbar() {
               </Link>
               <Link to="/map" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">
                 Mapa
+              </Link>
+              <Link to="/profile" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">
+                👤 Perfil
               </Link>
               {showPremiumLink && (
                 <Link to="/premium" onClick={() => setMenuOpen(false)} className="block py-2.5 text-sm hover:text-blue-300 transition-colors">

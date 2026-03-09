@@ -65,6 +65,70 @@ export const getRouteById = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// Página pública de share con metadatos Open Graph para WhatsApp
+export const getRouteShareInfo = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const esc = (value: string): string => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  try {
+    const routeRes = await pool.query(
+      `SELECT r.id, r.name, r.code, COALESCE(c.name, r.company, 'MiBus') AS company_name
+       FROM routes r
+       LEFT JOIN companies c ON c.id = r.company_id
+       WHERE r.id = $1`,
+      [id]
+    );
+
+    if (routeRes.rows.length === 0) {
+      res.status(404).send('<html><body>Ruta no encontrada</body></html>');
+      return;
+    }
+
+    const route = routeRes.rows[0] as {
+      id: number;
+      name: string;
+      code: string;
+      company_name: string;
+    };
+
+    const appBaseUrl = process.env.PUBLIC_APP_URL || process.env.APP_URL || 'https://mibus.co';
+    const appBusUrl = `${appBaseUrl.replace(/\/$/, '')}/bus/${route.id}`;
+    const ogTitle = esc(`🚌 ${route.code} · ${route.name}`);
+    const ogDescription = esc(`Voy en el bus ${route.code} (${route.name}). Súbete en MiBus.`);
+    const ogImage = `${appBaseUrl.replace(/\/$/, '')}/og-bus.png`;
+    const safeBusUrl = esc(appBusUrl);
+    const safeOgImage = esc(ogImage);
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${ogTitle}</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${ogTitle}" />
+    <meta property="og:description" content="${ogDescription}" />
+    <meta property="og:url" content="${safeBusUrl}" />
+    <meta property="og:image" content="${safeOgImage}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta http-equiv="refresh" content="0;url=${safeBusUrl}" />
+  </head>
+  <body>
+    <p>Redirigiendo a ${safeBusUrl}</p>
+  </body>
+</html>`);
+  } catch (error) {
+    console.error('Error obteniendo share de ruta:', error);
+    res.status(500).send('<html><body>Error interno del servidor</body></html>');
+  }
+};
+
 // Crear ruta nueva (requiere autenticación)
 export const createRoute = async (req: Request, res: Response): Promise<void> => {
   const { name, code, company, company_id, first_departure, last_departure, frequency_minutes, geometry } = req.body;

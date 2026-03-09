@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import pool from '../config/database';
+import { awardCredits } from './creditController';
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID || '';
 const googleClient = new OAuth2Client(googleClientId);
@@ -50,9 +51,36 @@ async function normalizePremiumState(user: AuthUserRow): Promise<AuthUserRow> {
   return user;
 }
 
+const REFERRAL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const REFERRAL_CODE_LENGTH = 6;
+
+function randomReferralCode(): string {
+  let code = '';
+  for (let i = 0; i < REFERRAL_CODE_LENGTH; i++) {
+    const idx = Math.floor(Math.random() * REFERRAL_ALPHABET.length);
+    code += REFERRAL_ALPHABET[idx];
+  }
+  return code;
+}
+
+async function generateUniqueReferralCode(): Promise<string> {
+  for (let i = 0; i < 12; i++) {
+    const code = randomReferralCode();
+    const exists = await pool.query('SELECT id FROM users WHERE referral_code = $1 LIMIT 1', [code]);
+    if (exists.rows.length === 0) return code;
+  }
+  throw new Error('No se pudo generar código de referido único');
+}
+
 // Registro de usuario
 export const register = async (req: Request, res: Response): Promise<void> => {
-  const { name, email, password, phone } = req.body;
+  const { name, email, password, phone, referralCode } = req.body as {
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+    referralCode?: string;
+  };
 
   try {
     const userExists = await pool.query(
@@ -65,13 +93,29 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const normalizedReferral = (referralCode ?? '').trim().toUpperCase();
+    let referrerId: number | null = null;
+    if (normalizedReferral) {
+      const referrerRes = await pool.query(
+        'SELECT id FROM users WHERE referral_code = $1 LIMIT 1',
+        [normalizedReferral]
+      );
+      if (referrerRes.rows.length === 0) {
+        res.status(400).json({ message: 'Código de referido inválido' });
+        return;
+      }
+      referrerId = Number(referrerRes.rows[0].id);
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
+    const referralCodeForUser = await generateUniqueReferralCode();
+    const welcomeCredits = 50 + (referrerId ? 10 : 0);
 
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, phone, credits, role, is_premium, trial_expires_at)
-       VALUES ($1, $2, $3, $4, 50, 'free', true, NOW() + INTERVAL '14 days')
+      `INSERT INTO users (name, email, password, phone, credits, role, is_premium, trial_expires_at, referral_code, referred_by)
+       VALUES ($1, $2, $3, $4, $5, 'free', true, NOW() + INTERVAL '14 days', $6, $7)
        RETURNING id, name, email, credits, role, is_premium, trial_expires_at`,
-      [name, email, hashedPassword, phone]
+      [name, email, hashedPassword, phone, welcomeCredits, referralCodeForUser, referrerId]
     );
 
     const user = result.rows[0];
@@ -81,6 +125,15 @@ export const register = async (req: Request, res: Response): Promise<void> => {
        VALUES ($1, 50, 'bonus', 'Créditos de bienvenida')`,
       [user.id]
     );
+
+    if (referrerId) {
+      await pool.query(
+        `INSERT INTO credit_transactions (user_id, amount, type, description)
+         VALUES ($1, 10, 'referral', 'Bono por registro con código de referido')`,
+        [user.id]
+      );
+      await awardCredits(referrerId, 25, 'referral', 'Amigo registrado con tu código');
+    }
 
     const token = signAuthToken(user);
 
@@ -166,7 +219,8 @@ async function getGoogleProfile(token: string): Promise<{ email: string; name: s
 
   try {
     const tokenInfo = await googleClient.getTokenInfo(token);
-    const validAudience = tokenInfo.aud === googleClientId;
+    const aud = tokenInfo.aud;
+    const validAudience = Array.isArray(aud) ? aud.includes(googleClientId) : aud === googleClientId;
     if (!validAudience || !tokenInfo.email) return null;
 
     const userInfoRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -222,10 +276,10 @@ export const googleLogin = async (req: Request, res: Response): Promise<void> =>
       user = await normalizePremiumState(user);
     } else {
       const createdRes = await pool.query(
-        `INSERT INTO users (name, email, password, credits, role, is_premium, trial_expires_at)
-         VALUES ($1, $2, $3, 50, 'free', true, NOW() + INTERVAL '14 days')
+        `INSERT INTO users (name, email, password, credits, role, is_premium, trial_expires_at, referral_code)
+         VALUES ($1, $2, $3, 50, 'free', true, NOW() + INTERVAL '14 days', $4)
          RETURNING id, name, email, credits, role, is_premium, trial_expires_at, premium_expires_at`,
-        [googleProfile.name, googleProfile.email, null]
+        [googleProfile.name, googleProfile.email, null, await generateUniqueReferralCode()]
       );
       user = createdRes.rows[0] as AuthUserRow;
 
@@ -267,6 +321,42 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 
   } catch (error) {
     console.error('Error obteniendo perfil:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Actualizar perfil básico del usuario autenticado
+export const updateProfile = async (req: Request, res: Response): Promise<void> => {
+  const { name } = req.body as { name?: string };
+  const userId = (req as any).userId as number;
+
+  const trimmedName = (name ?? '').trim();
+  if (!trimmedName) {
+    res.status(400).json({ message: 'El nombre es obligatorio' });
+    return;
+  }
+
+  try {
+    const updated = await pool.query(
+      `UPDATE users
+       SET name = $1
+       WHERE id = $2
+       RETURNING id, name, email, phone, credits, role, is_premium, is_active,
+                 trial_expires_at, premium_expires_at, reputation, created_at`,
+      [trimmedName, userId]
+    );
+
+    if (updated.rows.length === 0) {
+      res.status(404).json({ message: 'Usuario no encontrado' });
+      return;
+    }
+
+    res.json({
+      message: 'Perfil actualizado',
+      user: updated.rows[0],
+    });
+  } catch (error) {
+    console.error('Error actualizando perfil:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };

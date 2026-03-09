@@ -8,6 +8,9 @@ import Register from './pages/Register';
 import Map from './pages/Map';
 import PremiumPage from './pages/PremiumPage';
 import PaymentResultPage from './pages/PaymentResultPage';
+import Profile from './pages/Profile';
+import TripHistory from './pages/TripHistory';
+import BusPage from './pages/BusPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminCompanies from './pages/admin/AdminCompanies';
@@ -40,6 +43,9 @@ function AppRoutes() {
         <Route path="/" element={<Home />} />
         <Route path="/map" element={<Map />} />
         <Route path="/premium" element={<PremiumPage />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/trips/history" element={<TripHistory />} />
+        <Route path="/bus/:id" element={<BusPage />} />
         <Route path="/payment/result" element={<PaymentResultPage />} />
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />

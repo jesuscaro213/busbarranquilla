@@ -254,6 +254,30 @@ export const getTripCurrent = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// Historial de viajes finalizados del usuario autenticado
+export const getTripHistory = async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as any).userId as number;
+
+  try {
+    const result = await pool.query(
+      `SELECT at.id, at.route_id, r.name AS route_name, r.code AS route_code,
+              at.started_at, at.ended_at, at.credits_earned,
+              ROUND(EXTRACT(EPOCH FROM (at.ended_at - at.started_at))/60) AS duration_minutes
+       FROM active_trips at
+       LEFT JOIN routes r ON r.id = at.route_id
+       WHERE at.user_id = $1 AND at.is_active = false AND at.ended_at IS NOT NULL
+       ORDER BY at.started_at DESC
+       LIMIT 20`,
+      [userId]
+    );
+
+    res.json({ trips: result.rows });
+  } catch (error) {
+    console.error('Error obteniendo historial de viajes:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Obtener todos los buses activos (para carga inicial del mapa)
 export const getActiveBuses = async (req: Request, res: Response): Promise<void> => {
   try {

@@ -19,7 +19,7 @@ api.interceptors.request.use((config) => {
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export const authApi = {
-  register: (data: { name: string; email: string; password: string; phone?: string }) =>
+  register: (data: { name: string; email: string; password: string; phone?: string; referralCode?: string }) =>
     api.post('/api/auth/register', data),
 
   login: (data: { email: string; password: string }) =>
@@ -27,6 +27,9 @@ export const authApi = {
 
   googleLogin: (idToken: string) =>
     api.post('/api/auth/google', { idToken }),
+
+  updateProfile: (data: { name: string }) =>
+    api.patch('/api/auth/profile', data),
 
   getProfile: () =>
     api.get('/api/auth/profile'),
@@ -205,6 +208,9 @@ export const creditsApi = {
   getHistory: (limit = 20, offset = 0) =>
     api.get('/api/credits/history', { params: { limit, offset } }),
 
+  getStats: () =>
+    api.get('/api/credits/stats'),
+
   spend: (data: { amount: number; feature: string; description: string }) =>
     api.post('/api/credits/spend', data),
 };
@@ -222,6 +228,9 @@ export const paymentsApi = {
 // ─── Trips ───────────────────────────────────────────────────────────────────
 
 export const tripsApi = {
+  getHistory: () =>
+    api.get('/api/trips/history'),
+
   getActive: () =>
     api.get('/api/trips/active'),
 
@@ -246,6 +255,9 @@ export const tripsApi = {
 export const usersApi = {
   getFavorites: () =>
     api.get('/api/users/favorites'),
+
+  getReferral: () =>
+    api.get('/api/users/referral'),
 
   addFavorite: (routeId: number) =>
     api.post('/api/users/favorites', { route_id: routeId }),

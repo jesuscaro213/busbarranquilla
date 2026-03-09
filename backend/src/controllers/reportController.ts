@@ -232,6 +232,36 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
     const report = result.rows[0];
     reportCreated = true;
 
+    // ── Actualizar racha de reportes diarios (P1-2) ───────────────────────
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const userRes = await pool.query(
+      'SELECT last_report_date, report_streak FROM users WHERE id = $1',
+      [userId]
+    );
+
+    const lastReportDateRaw = userRes.rows[0]?.last_report_date as string | Date | null | undefined;
+    const lastReportDate = !lastReportDateRaw
+      ? null
+      : (lastReportDateRaw instanceof Date
+        ? lastReportDateRaw.toISOString().split('T')[0]
+        : String(lastReportDateRaw).split('T')[0]);
+    const currentStreak = Number(userRes.rows[0]?.report_streak ?? 0);
+
+    let newStreak = 1;
+    if (lastReportDate === yesterday) newStreak = currentStreak + 1;
+    else if (lastReportDate === today) newStreak = currentStreak;
+
+    await pool.query(
+      'UPDATE users SET last_report_date = $1, report_streak = $2 WHERE id = $3',
+      [today, newStreak, userId]
+    );
+
+    // Solo premiar cuando la racha avanza respecto a ayer (evita duplicar bonus en el mismo día)
+    if (lastReportDate === yesterday && newStreak > 0 && newStreak % 7 === 0) {
+      await awardCredits(userId, 30, 'streak', `🔥 ¡Racha de ${newStreak} días! Bonus de créditos`);
+    }
+
     // ── Emitir evento en tiempo real a los demás usuarios de la ruta ─────
     if (route_id) {
       const needed = otherActiveUsers > 0 ? Math.ceil(otherActiveUsers * 0.5) : 1;

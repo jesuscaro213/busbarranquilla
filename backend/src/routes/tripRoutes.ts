@@ -6,6 +6,7 @@ import {
   updateLocation,
   endTrip,
   getTripCurrent,
+  getTripHistory,
 } from '../controllers/tripController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 
@@ -13,6 +14,7 @@ const router = Router();
 
 // Rutas con nombre antes de rutas con parámetros (aunque no hay params aquí)
 router.get('/current', authMiddleware, getTripCurrent);
+router.get('/history', authMiddleware, getTripHistory);
 router.get('/active', authMiddleware, getActiveTrip);
 router.get('/buses', getActiveBuses); // público: cualquier visitante ve los buses activos
 router.post('/start', authMiddleware, startTrip);

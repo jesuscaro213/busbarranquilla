@@ -12,6 +12,7 @@ import {
   getActiveFeed,
   getPlanRoutes,
   regenerateGeometry,
+  getRouteActivity,
 } from '../controllers/routeController';
 import { recommendRoutes } from '../controllers/recommendController';
 import {
@@ -47,6 +48,7 @@ router.put('/:id', authMiddleware, requireRole('admin'), updateRoute);
 router.delete('/:id', authMiddleware, requireRole('admin'), deleteRoute);
 router.patch('/:id/toggle', authMiddleware, requireRole('admin'), toggleRouteActive);
 router.post('/:id/regenerate-geometry', authMiddleware, requireRole('admin'), regenerateGeometry);
+router.get('/:id/activity', authMiddleware, getRouteActivity);
 router.post('/:id/update-report', authMiddleware, reportRouteUpdate);
 router.patch('/:id/dismiss-alert', authMiddleware, requireRole('admin'), dismissRouteAlert);
 

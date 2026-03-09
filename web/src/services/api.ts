@@ -88,6 +88,9 @@ export const routesApi = {
   toggleActive: (id: number) =>
     api.patch(`/api/routes/${id}/toggle`),
 
+  getActivity: (id: number) =>
+    api.get(`/api/routes/${id}/activity`),
+
   scanBlog: () =>
     api.post('/api/admin/routes/scan-blog'),
 

@@ -96,6 +96,7 @@ export default function Map() {
   const [planDest, setPlanDest] = useState<{ lat: number; lng: number } | null>(null);
   const [planRouteStops, setPlanRouteStops] = useState<{ latitude: number; longitude: number }[]>([]);
   const [planDropoffStop, setPlanDropoffStop] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
+  const [routeActivityPositions, setRouteActivityPositions] = useState<{ lat: number; lng: number; minutes_ago: number }[]>([]);
 
   // Map pick mode for planner
   const [mapPickMode, setMapPickMode] = useState<'none' | 'origin' | 'dest'>('none');
@@ -468,6 +469,7 @@ export default function Map() {
                 setSheetMode('trip');
                 setSheetState('middle');
               }}
+              onActivityPositions={setRouteActivityPositions}
             />
           </div>
         );
@@ -497,6 +499,7 @@ export default function Map() {
         planDropoffStop={planDropoffStop}
         catchBusBoardingStop={catchBusBoardingStop}
         catchBusUserPosition={userPosition}
+        routeActivityPositions={routeActivityPositions}
       />
 
       {/* ── Top bar ───────────────────────────────────────────────────────── */}

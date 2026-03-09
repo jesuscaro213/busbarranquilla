@@ -519,6 +519,104 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+// GET /api/routes/:id/activity — actividad de la última hora para una ruta
+export const getRouteActivity = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const [activeTripsRes, recentTripsRes, reportsRes] = await Promise.all([
+      // Viajes activos ahora mismo en esta ruta
+      pool.query(
+        `SELECT current_latitude, current_longitude,
+                ROUND(EXTRACT(EPOCH FROM (NOW() - last_location_at)) / 60)::int AS minutes_ago
+         FROM active_trips
+         WHERE route_id = $1
+           AND is_active = true
+           AND last_location_at > NOW() - INTERVAL '1 hour'
+         ORDER BY last_location_at DESC`,
+        [id]
+      ),
+      // Viajes iniciados en la última hora (subidas y bajadas)
+      pool.query(
+        `SELECT current_latitude AS lat, current_longitude AS lng,
+                ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int AS minutes_ago,
+                is_active,
+                ended_at IS NOT NULL AND is_active = false AS alighted
+         FROM active_trips
+         WHERE route_id = $1
+           AND started_at > NOW() - INTERVAL '1 hour'
+         ORDER BY started_at DESC
+         LIMIT 15`,
+        [id]
+      ),
+      // Reportes activos de la última hora
+      pool.query(
+        `SELECT type, latitude, longitude, description, confirmations,
+                ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60)::int AS minutes_ago
+         FROM reports
+         WHERE route_id = $1
+           AND is_active = true
+           AND created_at > NOW() - INTERVAL '1 hour'
+         ORDER BY created_at DESC`,
+        [id]
+      ),
+    ]);
+
+    const activePositions = activeTripsRes.rows.map(t => ({
+      lat: parseFloat(t.current_latitude),
+      lng: parseFloat(t.current_longitude),
+      minutes_ago: t.minutes_ago,
+    }));
+
+    // Construir timeline de eventos
+    const events: any[] = [];
+
+    // Subidas y bajadas (excluir los que ya están en activePositions)
+    const activeIds = new Set(activeTripsRes.rows.map(t => `${t.current_latitude},${t.current_longitude}`));
+    for (const t of recentTripsRes.rows) {
+      const key = `${t.lat},${t.lng}`;
+      if (t.is_active && activeIds.has(key)) continue; // ya incluido como activo
+      events.push({
+        type: t.alighted ? 'alighting' : 'boarding',
+        minutes_ago: t.minutes_ago,
+        lat: parseFloat(t.lat),
+        lng: parseFloat(t.lng),
+      });
+    }
+
+    // Reportes
+    for (const r of reportsRes.rows) {
+      events.push({
+        type: 'report',
+        report_type: r.type,
+        minutes_ago: r.minutes_ago,
+        lat: parseFloat(r.latitude),
+        lng: parseFloat(r.longitude),
+        confirmations: r.confirmations,
+        description: r.description ?? null,
+      });
+    }
+
+    events.sort((a, b) => a.minutes_ago - b.minutes_ago);
+
+    const allMinutes = [
+      ...activeTripsRes.rows.map(t => t.minutes_ago),
+      ...events.map(e => e.minutes_ago),
+    ];
+    const lastActivityMinutes = allMinutes.length > 0 ? Math.min(...allMinutes) : null;
+
+    res.json({
+      active_count: activeTripsRes.rowCount ?? 0,
+      last_activity_minutes: lastActivityMinutes,
+      events,
+      active_positions: activePositions,
+    });
+  } catch (error) {
+    console.error('Error en getRouteActivity:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Regenerar geometría de una ruta llamando OSRM (requiere admin)
 export const regenerateGeometry = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;

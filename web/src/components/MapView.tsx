@@ -50,6 +50,7 @@ interface Props {
   planDropoffStop?: { latitude: number; longitude: number; name: string } | null;
   catchBusBoardingStop?: { latitude: number; longitude: number; name: string } | null;
   catchBusUserPosition?: [number, number] | null;
+  routeActivityPositions?: { lat: number; lng: number; minutes_ago: number }[];
 }
 
 // Centro de Barranquilla
@@ -80,6 +81,16 @@ const BUS_ICON = L.divIcon({
   className: '',
   iconSize: [28, 28],
   iconAnchor: [14, 28],
+});
+
+const ACTIVITY_BUS_ICON = L.divIcon({
+  html: `<div style="position:relative;width:32px;height:32px">
+    <div style="position:absolute;inset:0;background:#f59e0b;border-radius:50%;opacity:0.25;animation:ping 1.5s cubic-bezier(0,0,.2,1) infinite"></div>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.35))">🚌</div>
+  </div>`,
+  className: '',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
 });
 
 // ─── Íconos de recomendación ──────────────────────────────────────────────────
@@ -648,6 +659,7 @@ export default function MapView({
   planDropoffStop,
   catchBusBoardingStop,
   catchBusUserPosition,
+  routeActivityPositions = [],
 }: Props) {
   const [reports, setReports] = useState<Report[]>([]);
   const [routeFilter, setRouteFilter] = useState<RouteFilter>('all');
@@ -699,6 +711,15 @@ export default function MapView({
       <FeedRouteLayer stops={feedRouteStops} geometry={feedRouteGeometry} />
       <ActiveTripLayer geometry={activeTripGeometry} />
       <BoardingMarkerLayer stop={catchBusBoardingStop} userPosition={catchBusUserPosition} />
+      {routeActivityPositions.map((pos, i) => (
+        <Marker
+          key={`activity-${i}`}
+          position={[pos.lat, pos.lng]}
+          icon={ACTIVITY_BUS_ICON}
+        >
+          <Popup>🚌 En el bus · hace {pos.minutes_ago < 1 ? 'un momento' : `${pos.minutes_ago} min`}</Popup>
+        </Marker>
+      ))}
       <PlanLayer
         origin={planOrigin}
         dest={planDest}

@@ -39,6 +39,23 @@ interface StopForMap {
   longitude: number;
 }
 
+interface ActivityEvent {
+  type: 'active_trip' | 'boarding' | 'alighting' | 'report';
+  report_type?: string;
+  minutes_ago: number;
+  lat: number;
+  lng: number;
+  confirmations?: number;
+  description?: string | null;
+}
+
+interface ActivityData {
+  active_count: number;
+  last_activity_minutes: number | null;
+  events: ActivityEvent[];
+  active_positions: { lat: number; lng: number; minutes_ago: number }[];
+}
+
 interface Props {
   userPosition: [number, number] | null;
   mapPickedOrigin?: { lat: number; lng: number } | null;
@@ -51,6 +68,7 @@ interface Props {
     dropoffStop: { latitude: number; longitude: number; name: string } | null;
   }) => void;
   onBoardRoute?: (routeId: number, destinationStopId?: number) => void;
+  onActivityPositions?: (positions: { lat: number; lng: number; minutes_ago: number }[]) => void;
 }
 
 const GEOAPIFY_KEY = '5ccd06229fa54e23ad29c21a62e545d4';
@@ -346,6 +364,7 @@ export default function PlanTripMode({
   onRequestMapPick,
   onPlanUpdate,
   onBoardRoute,
+  onActivityPositions,
 }: Props) {
   // Origin
   const [originQuery, setOriginQuery] = useState('');
@@ -366,6 +385,9 @@ export default function PlanTripMode({
   const [planLoading, setPlanLoading] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<PlanRoute | null>(null);
   const [selectedDropoffStopId, setSelectedDropoffStopId] = useState<number | undefined>(undefined);
+  const [activityByRoute, setActivityByRoute] = useState<Record<number, ActivityData>>({});
+  const [activityExpanded, setActivityExpanded] = useState<Record<number, boolean>>({});
+  const [activityLoading, setActivityLoading] = useState<Record<number, boolean>>({});
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [searchError, setSearchError] = useState('');
   const [nearbyRoutes, setNearbyRoutes] = useState<NearbyRoute[]>([]);
@@ -704,6 +726,21 @@ export default function PlanTripMode({
         name: route.nearest_stop_name,
       },
     });
+
+    // Fetch activity for this route (non-blocking)
+    if (!activityByRoute[route.id]) {
+      setActivityLoading(prev => ({ ...prev, [route.id]: true }));
+      try {
+        const res = await routesApi.getActivity(route.id);
+        const data: ActivityData = res.data;
+        setActivityByRoute(prev => ({ ...prev, [route.id]: data }));
+        onActivityPositions?.(data.active_positions);
+      } catch { /* silencioso */ } finally {
+        setActivityLoading(prev => ({ ...prev, [route.id]: false }));
+      }
+    } else {
+      onActivityPositions?.(activityByRoute[route.id].active_positions);
+    }
   };
 
   const toggleFavorite = async (e: React.MouseEvent, routeId: number) => {
@@ -737,6 +774,9 @@ export default function PlanTripMode({
     previewRouteIdRef.current = null;
     onPlanUpdate({ origin, dest: null, routeStops: [], dropoffStop: null });
   };
+
+  // Capturar selectedRouteId antes del early return para usarlo en results.map
+  const selectedRouteId = selectedRoute?.id ?? null;
 
   // ── Route detail ───────────────────────────────────────────────────────
   if (selectedRoute) {
@@ -953,50 +993,112 @@ export default function PlanTripMode({
           <p className="text-xs text-gray-500">
             {results.length} ruta{results.length !== 1 ? 's' : ''} pasan cerca de tu destino
           </p>
-          {results.map((r) => (
-            <div
-              key={r.id}
-              onClick={() => handleSelectRoute(r)}
-              className="w-full text-left bg-white border border-gray-100 rounded-xl p-3 hover:bg-blue-50 hover:border-blue-100 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-semibold text-gray-900 truncate flex-1">
-                  {r.company_name ?? r.name}
-                </span>
-                <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-md shrink-0">
-                  {r.code}
-                </span>
-                <button
-                  onClick={(e) => toggleFavorite(e, r.id)}
-                  className="shrink-0 text-base leading-none"
+          {results.map((r) => {
+            const rId = (r as PlanRoute).id;
+            const activity = activityByRoute[rId];
+            const isExpanded = activityExpanded[rId] ?? false;
+            const isLoadingActivity = activityLoading[rId] ?? false;
+            const isSelected = selectedRouteId === rId;
+
+            const REPORT_LABELS: Record<string, string> = {
+              trancon: '🚧 Trancón', lleno: '🔴 Bus lleno', bus_disponible: '🟢 Hay sillas',
+              desvio: '↩️ Desvío', sin_parar: '🚌 No paró', espera: '⏳ Mucha espera',
+              traffic: '🚧 Trancón', bus_full: '🔴 Bus lleno', no_service: '⛔ Sin servicio',
+            };
+
+            return (
+              <div
+                key={rId}
+                className={`bg-white border rounded-xl overflow-hidden transition-colors ${
+                  isSelected ? 'border-blue-300' : 'border-gray-100'
+                }`}
+              >
+                {/* Main card row */}
+                <div
+                  onClick={() => handleSelectRoute(r)}
+                  className="p-3 hover:bg-blue-50 transition-colors cursor-pointer"
                 >
-                  {favorites.has(r.id) ? '⭐' : '☆'}
-                </button>
-              </div>
-              <div className="flex items-center gap-3 text-xs pl-0.5 flex-wrap">
-                {r.origin_distance_meters != null && (() => {
-                  const d = r.origin_distance_meters;
-                  const cls = d <= 300 ? 'text-green-600' : d <= 600 ? 'text-amber-600' : 'text-red-500';
-                  const icon = d <= 300 ? '🚶' : d <= 600 ? '🚶' : '⚠️';
-                  return (
-                    <span className={`font-medium ${cls}`}>
-                      {icon} {d} m para subir{d > 600 ? ' (lejos)' : ''}
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold text-gray-900 truncate flex-1">
+                      {r.company_name ?? r.name}
                     </span>
-                  );
-                })()}
-                {(() => {
-                  const d = r.distance_meters;
-                  const cls = d <= 300 ? 'text-green-600' : d <= 600 ? 'text-amber-600' : 'text-red-500';
-                  const suffix = d > 600 ? ' al bajar (lejos)' : ' al bajar';
-                  return <span className={`font-medium ${cls}`}>🏁 {d} m{suffix}</span>;
-                })()}
-                {r.frequency_minutes && <span className="text-gray-500">🕐 Cada {r.frequency_minutes} min</span>}
-                {r.minutes_ago !== null && (
-                  <span className="text-amber-600">📡 {r.minutes_ago} min</span>
+                    <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-md shrink-0">
+                      {r.code}
+                    </span>
+                    <button onClick={(e) => toggleFavorite(e, r.id)} className="shrink-0 text-base leading-none">
+                      {favorites.has(r.id) ? '⭐' : '☆'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs pl-0.5 flex-wrap">
+                    {r.origin_distance_meters != null && (() => {
+                      const d = r.origin_distance_meters;
+                      const cls = d <= 300 ? 'text-green-600' : d <= 600 ? 'text-amber-600' : 'text-red-500';
+                      return <span className={`font-medium ${cls}`}>{d <= 600 ? '🚶' : '⚠️'} {d} m para subir{d > 600 ? ' (lejos)' : ''}</span>;
+                    })()}
+                    {(() => {
+                      const d = r.distance_meters;
+                      const cls = d <= 300 ? 'text-green-600' : d <= 600 ? 'text-amber-600' : 'text-red-500';
+                      return <span className={`font-medium ${cls}`}>🏁 {d} m{d > 600 ? ' al bajar (lejos)' : ' al bajar'}</span>;
+                    })()}
+                    {r.frequency_minutes && <span className="text-gray-500">🕐 Cada {r.frequency_minutes} min</span>}
+                  </div>
+                </div>
+
+                {/* Activity summary bar */}
+                {(activity || isLoadingActivity) && (
+                  <div className="border-t border-gray-100">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActivityExpanded(prev => ({ ...prev, [r.id]: !isExpanded }));
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="flex items-center gap-2 text-gray-600">
+                        {isLoadingActivity ? (
+                          <span className="text-gray-400">Cargando actividad...</span>
+                        ) : activity ? (
+                          <>
+                            {activity.active_count > 0
+                              ? <span className="text-green-600 font-semibold">🚌 {activity.active_count} {activity.active_count === 1 ? 'persona en el bus ahora' : 'personas en el bus ahora'}</span>
+                              : activity.last_activity_minutes !== null
+                                ? <span className="text-amber-600">📡 Última actividad hace {activity.last_activity_minutes} min</span>
+                                : <span className="text-gray-400">Sin actividad reciente</span>
+                            }
+                          </>
+                        ) : null}
+                      </span>
+                      {activity && activity.events.length > 0 && (
+                        <span className="text-gray-400">{isExpanded ? '▲' : '▼'}</span>
+                      )}
+                    </button>
+
+                    {/* Expanded events list */}
+                    {isExpanded && activity && activity.events.length > 0 && (
+                      <div className="px-3 pb-2 space-y-1 border-t border-gray-50">
+                        {activity.events.map((ev, i) => {
+                          const timeStr = ev.minutes_ago < 1 ? 'hace un momento' : `hace ${ev.minutes_ago} min`;
+                          if (ev.type === 'boarding') return (
+                            <p key={i} className="text-xs text-gray-500">🟢 Alguien abordó {timeStr}</p>
+                          );
+                          if (ev.type === 'alighting') return (
+                            <p key={i} className="text-xs text-gray-500">🔵 Alguien bajó {timeStr}</p>
+                          );
+                          if (ev.type === 'report') return (
+                            <p key={i} className="text-xs text-gray-600">
+                              {REPORT_LABELS[ev.report_type ?? ''] ?? '📍 Reporte'} {timeStr}
+                              {ev.confirmations && ev.confirmations > 0 ? ` · ${ev.confirmations} confirmaciones` : ''}
+                            </p>
+                          );
+                          return null;
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

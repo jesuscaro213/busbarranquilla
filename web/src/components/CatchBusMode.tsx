@@ -285,7 +285,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     return () => clearInterval(interval);
   }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Monitor 1: auto-resolver trancón si el bus se movió >200m ─────────
+  // ── Monitor 1: auto-resolver trancón si el bus se movió >1km ────────────
   useEffect(() => {
     if (!activeTrip) return;
 
@@ -295,10 +295,14 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       if (!report || !pos) return;
 
       const dist = haversineMeters(report.lat, report.lng, pos[0], pos[1]);
-      if (dist > 200) {
+      if (dist > 1000) {
         reportsApi.resolve(report.reportId)
-          .then(() => {
-            showToast('✅ Trancón resuelto automáticamente');
+          .then((res) => {
+            const mins: number = res.data?.duration_minutes ?? 0;
+            showToast(mins > 0
+              ? `✅ Trancón resuelto — duró ~${mins} min`
+              : '✅ Trancón resuelto automáticamente'
+            );
             trafficReportRef.current = null;
           })
           .catch(() => {});
@@ -636,18 +640,54 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       );
     };
 
+    const onReportResolved = (data: { reportId: number; type: string; duration_minutes: number }) => {
+      setRouteReports((prev) => prev.filter((r) => r.id !== data.reportId));
+      if (data.type === 'trancon') {
+        showToast(data.duration_minutes > 0
+          ? `✅ Trancón resuelto — duró ~${data.duration_minutes} min`
+          : '✅ El trancón en esta ruta fue resuelto'
+        );
+      }
+    };
+
     socket.on('route:new_report', onNewReport);
     socket.on('route:report_confirmed', onReportConfirmed);
+    socket.on('route:report_resolved', onReportResolved);
 
     return () => {
       socket.emit('leave:route', routeId);
       socket.off('route:new_report', onNewReport);
       socket.off('route:report_confirmed', onReportConfirmed);
+      socket.off('route:report_resolved', onReportResolved);
       setRouteReports([]);
       setConfirmCreditsEarned(0);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrip?.route_id]);
+
+  // ── Socket: notificaciones mientras espera el bus ─────────────────────
+  useEffect(() => {
+    if (view !== 'waiting' || !selectedRoute) return;
+    const socket = getSocket();
+    socket.emit('join:route', selectedRoute.id);
+
+    const onReportResolved = (data: { type: string; duration_minutes: number }) => {
+      if (data.type === 'trancon') {
+        showToast(data.duration_minutes > 0
+          ? `✅ El trancón en esta ruta se resolvió — duró ~${data.duration_minutes} min`
+          : '✅ El trancón en esta ruta fue resuelto'
+        );
+      }
+    };
+
+    socket.on('route:report_resolved', onReportResolved);
+
+    return () => {
+      socket.emit('leave:route', selectedRoute.id);
+      socket.off('route:report_resolved', onReportResolved);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selectedRoute?.id]);
 
   // ── Favorites toggle ──────────────────────────────────────────────────
   const toggleFavorite = async (e: React.MouseEvent, routeId: number) => {
@@ -1024,9 +1064,11 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
   if (view === 'summary' && summaryData) {
     return (
       <div className="space-y-4">
-        <div className="bg-green-50 border border-green-100 rounded-2xl p-5 text-center space-y-2">
-          <p className="text-4xl">🎉</p>
-          <p className="font-bold text-gray-900 text-base">¡Llegaste!</p>
+        <div className={`border rounded-2xl p-5 text-center space-y-2 ${summaryData.note ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100'}`}>
+          <p className="text-4xl">{summaryData.note ? '⏹️' : '🎉'}</p>
+          <p className="font-bold text-gray-900 text-base">
+            {summaryData.note ?? '¡Llegaste!'}
+          </p>
           {summaryData.routeCode && (
             <span className="inline-block bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-md">
               {summaryData.routeCode}

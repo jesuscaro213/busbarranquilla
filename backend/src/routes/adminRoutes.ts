@@ -19,6 +19,7 @@ import {
   importOSMBuses,
   listTransmetroRoutes,
   listBusRoutes,
+  getAdminStats,
 } from '../controllers/adminController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
@@ -26,6 +27,7 @@ import { requireRole } from '../middlewares/roleMiddleware';
 const router = Router();
 
 // Todas las rutas admin requieren authMiddleware + requireRole('admin')
+router.get('/stats', authMiddleware, requireRole('admin'), getAdminStats);
 router.get('/users', authMiddleware, requireRole('admin'), getAllUsers);
 router.get('/users/:id', authMiddleware, requireRole('admin'), getUserById);
 router.patch('/users/:id/role', authMiddleware, requireRole('admin'), updateUserRole);

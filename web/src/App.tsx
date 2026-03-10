@@ -17,6 +17,7 @@ import AdminCompanies from './pages/admin/AdminCompanies';
 import AdminTransmetro from './pages/admin/AdminTransmetro';
 import AdminBuses from './pages/admin/AdminBuses';
 import AdminRouteAlerts from './pages/admin/AdminRouteAlerts';
+import AdminStats from './pages/admin/AdminStats';
 
 function PublicLayout() {
   return <><Navbar /><Outlet /></>;
@@ -55,7 +56,8 @@ function AppRoutes() {
       {/* Layout admin — con AdminRoute guard + AdminLayout sidebar */}
       <Route element={<AdminRoute />}>
         <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<Navigate to="/admin/buses" replace />} />
+          <Route path="/admin" element={<Navigate to="/admin/stats" replace />} />
+          <Route path="/admin/stats" element={<AdminStats />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/companies" element={<AdminCompanies />} />
           <Route path="/admin/buses" element={<AdminBuses />} />

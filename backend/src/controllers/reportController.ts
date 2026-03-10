@@ -359,7 +359,7 @@ export const resolveReport = async (req: Request, res: Response): Promise<void> 
       `UPDATE reports
        SET is_active = false, resolved_at = NOW()
        WHERE id = $1 AND user_id = $2
-       RETURNING id`,
+       RETURNING id, type, route_id, created_at, resolved_at`,
       [id, userId]
     );
 
@@ -368,7 +368,20 @@ export const resolveReport = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    res.json({ message: 'Reporte resuelto correctamente' });
+    const report = result.rows[0];
+    const durationMs = new Date(report.resolved_at).getTime() - new Date(report.created_at).getTime();
+    const durationMinutes = Math.round(durationMs / 60000);
+
+    // Notificar en tiempo real a todos en la ruta que el reporte fue resuelto
+    if (report.route_id) {
+      getIo().to(`route:${report.route_id}`).emit('route:report_resolved', {
+        reportId: report.id,
+        type: report.type,
+        duration_minutes: durationMinutes,
+      });
+    }
+
+    res.json({ message: 'Reporte resuelto correctamente', duration_minutes: durationMinutes });
 
   } catch (error) {
     console.error('Error resolviendo reporte:', error);

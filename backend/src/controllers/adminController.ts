@@ -441,3 +441,75 @@ export const listBusRoutes = async (_req: Request, res: Response): Promise<void>
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
+
+// GET /api/admin/stats — dashboard de estadísticas agregadas
+export const getAdminStats = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const [
+      usersRes,
+      tripsRes,
+      reportsRes,
+      creditsRes,
+      activeNowRes,
+      topRoutesRes,
+    ] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE is_active = true)::int AS active,
+          COUNT(*) FILTER (WHERE role = 'premium')::int AS premium,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS new_this_week
+        FROM users
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE started_at > NOW() - INTERVAL '24 hours')::int AS today,
+          COUNT(*) FILTER (WHERE started_at > NOW() - INTERVAL '7 days')::int AS this_week,
+          COUNT(*) FILTER (WHERE is_active = true)::int AS active_now
+        FROM active_trips
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS today,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS this_week
+        FROM reports
+      `),
+      pool.query(`
+        SELECT
+          COALESCE(SUM(amount) FILTER (WHERE type = 'earn' AND created_at > NOW() - INTERVAL '24 hours'), 0)::int AS earned_today,
+          COALESCE(SUM(amount) FILTER (WHERE type = 'earn'), 0)::int AS earned_total
+        FROM credit_transactions
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS count
+        FROM active_trips
+        WHERE is_active = true
+      `),
+      pool.query(`
+        SELECT r.id, r.name, r.code,
+               COUNT(at.id)::int AS trips_24h
+        FROM routes r
+        JOIN active_trips at ON at.route_id = r.id
+        WHERE at.started_at > NOW() - INTERVAL '24 hours'
+        GROUP BY r.id, r.name, r.code
+        ORDER BY trips_24h DESC
+        LIMIT 5
+      `),
+    ]);
+
+    res.json({
+      users: usersRes.rows[0],
+      trips: tripsRes.rows[0],
+      reports: reportsRes.rows[0],
+      credits: creditsRes.rows[0],
+      active_now: activeNowRes.rows[0].count,
+      top_routes: topRoutesRes.rows,
+    });
+  } catch (error) {
+    console.error('Error obteniendo stats admin:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+

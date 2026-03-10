@@ -169,6 +169,8 @@ export const adminApi = {
     api.get('/api/admin/companies', {
       params: isActive !== undefined ? { is_active: isActive } : undefined,
     }),
+  getStats: () =>
+    api.get('/api/admin/stats'),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

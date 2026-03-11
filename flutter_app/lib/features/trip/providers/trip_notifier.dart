@@ -4,10 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/data/repositories/credits_repository.dart';
 import '../../../core/data/repositories/reports_repository.dart';
 import '../../../core/data/repositories/routes_repository.dart';
 import '../../../core/data/repositories/stops_repository.dart';
 import '../../../core/data/repositories/trips_repository.dart';
+import '../../auth/providers/auth_notifier.dart';
+import '../../auth/providers/auth_state.dart';
 import '../../../core/domain/models/active_trip.dart';
 import '../../../core/domain/models/trip_end_result.dart';
 import '../../../core/domain/models/bus_route.dart';
@@ -25,10 +28,18 @@ import 'trip_state.dart';
 
 class TripNotifier extends Notifier<TripState> {
   Timer? _locationTimer;
+  Timer? _gpsCheckTimer;
+  Timer? _occupancyPollTimer;
+  DateTime _lastGpsAt = DateTime.now();
   DropoffMonitor? _dropoffMonitor;
   InactivityMonitor? _inactivityMonitor;
   AutoResolveMonitor? _autoResolveMonitor;
   DesvioMonitor? _desvioMonitor;
+
+  Stop? _pendingDropoffDestination;
+
+  DateTime? _occupancyCooldownEnd;
+  final Set<String> _occupancyCredited = <String>{};
 
   void Function(String message)? _onReportResolved;
 
@@ -39,7 +50,47 @@ class TripNotifier extends Notifier<TripState> {
   @override
   TripState build() {
     ref.onDispose(_disposeMonitorsAndTimers);
+    Future<void>.microtask(_recoverActiveTrip);
     return const TripIdle();
+  }
+
+  Future<void> _recoverActiveTrip() async {
+    final result = await ref.read(tripsRepositoryProvider).getCurrent();
+    if (result is! Success<ActiveTrip?>) return;
+    final trip = result.data;
+    if (trip == null || trip.routeId == null) return;
+
+    if (state is TripActive) return;
+
+    final routeId = trip.routeId!;
+
+    final routeResult = await ref.read(routesRepositoryProvider).getById(routeId);
+    if (routeResult is! Success<BusRoute>) return;
+    final route = routeResult.data;
+
+    final stopsResult = await ref.read(stopsRepositoryProvider).listByRoute(routeId);
+    final stops = stopsResult is Success<List<Stop>> ? stopsResult.data : const <Stop>[];
+
+    final reportsResult = await ref.read(reportsRepositoryProvider).getRouteReports(routeId);
+    final reports = reportsResult is Success<List<Report>> ? reportsResult.data : const <Report>[];
+
+    final activeState = TripActive(
+      trip: trip,
+      route: route,
+      stops: stops,
+      reports: reports,
+    );
+
+    _occupancyCooldownEnd = null;
+    _occupancyCredited.clear();
+
+    state = activeState;
+
+    ref.read(socketServiceProvider).joinRoute(routeId);
+    _bindSocketRouteListeners(routeId);
+    _startLocationBroadcast();
+    _startMonitors(activeState, trip.destinationStopId);
+    _startOccupancyPolling(routeId);
   }
 
   bool get isActive => state is TripActive;
@@ -139,12 +190,17 @@ class TripNotifier extends Notifier<TripState> {
       reports: reports,
     );
 
+    _occupancyCooldownEnd = null;
+    _occupancyCredited.clear();
+    _lastGpsAt = DateTime.now();
+
     state = activeState;
 
     ref.read(socketServiceProvider).joinRoute(routeId);
     _bindSocketRouteListeners(routeId);
     _startLocationBroadcast();
     _startMonitors(activeState, destinationStopId);
+    _startOccupancyPolling(routeId);
   }
 
   Future<void> endTrip() async {
@@ -196,6 +252,12 @@ class TripNotifier extends Notifier<TripState> {
     }
   }
 
+  void dismissSuspiciousModal() {
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(showSuspiciousModal: false);
+    }
+  }
+
   void dismissDesvio() {
     _desvioMonitor?.resetAlert();
     if (state is TripActive) {
@@ -208,6 +270,55 @@ class TripNotifier extends Notifier<TripState> {
     if (state is TripActive) {
       state = (state as TripActive).copyWith(desvioDetected: false);
     }
+  }
+
+  Future<void> activateDropoffAlerts() async {
+    if (state is! TripActive) return;
+
+    final creditResult = await ref.read(creditsRepositoryProvider).spend(<String, dynamic>{
+      'amount': 5,
+      'description': 'Alertas de bajada',
+    });
+    if (creditResult is Failure) {
+      state = (state as TripActive).copyWith(dropoffPrompt: false);
+      return;
+    }
+
+    state = (state as TripActive).copyWith(dropoffPrompt: false);
+
+    if (_pendingDropoffDestination != null && state is TripActive) {
+      final active = state as TripActive;
+      _startDropoffMonitor(_pendingDropoffDestination!, active.stops);
+      _pendingDropoffDestination = null;
+    }
+  }
+
+  void dismissDropoffPrompt() {
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(dropoffPrompt: false);
+    }
+    _pendingDropoffDestination = null;
+  }
+
+  void _startDropoffMonitor(Stop destination, List<Stop> allStops) {
+    _dropoffMonitor?.dispose();
+    _dropoffMonitor = DropoffMonitor(
+      destination: destination,
+      allStops: allStops,
+      onPrepare: () {
+        if (state is! TripActive) return;
+        state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.prepare);
+      },
+      onAlight: () {
+        if (state is! TripActive) return;
+        state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.alight);
+        HapticFeedback.vibrate();
+      },
+      onMissed: () {
+        if (state is! TripActive) return;
+        state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.missed);
+      },
+    )..start();
   }
 
   Future<void> confirmReport(int reportId) async {
@@ -225,6 +336,19 @@ class TripNotifier extends Notifier<TripState> {
   Future<void> createReport(String type) async {
     if (state is! TripActive) return;
 
+    final isOccupancy = type == 'lleno' || type == 'bus_disponible';
+
+    if (isOccupancy) {
+      final cooldown = _occupancyCooldownEnd;
+      if (cooldown != null && DateTime.now().isBefore(cooldown)) {
+        final remaining = cooldown.difference(DateTime.now()).inMinutes + 1;
+        state = (state as TripActive).copyWith(
+          reportError: 'Espera $remaining min antes de reportar ocupación de nuevo',
+        );
+        return;
+      }
+    }
+
     final active = state as TripActive;
     final pos = await LocationService.getCurrentPosition();
     if (pos == null) return;
@@ -238,9 +362,19 @@ class TripNotifier extends Notifier<TripState> {
 
     switch (result) {
       case Success<Report>():
+        if (isOccupancy) {
+          _occupancyCooldownEnd = DateTime.now().add(const Duration(minutes: 10));
+          _occupancyCredited.add(type);
+        }
         await _reloadReports();
       case Failure<Report>():
         return;
+    }
+  }
+
+  void clearReportError() {
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(clearReportError: true);
     }
   }
 
@@ -285,6 +419,8 @@ class TripNotifier extends Notifier<TripState> {
       final pos = await LocationService.getCurrentPosition();
       if (pos == null) return;
 
+      _lastGpsAt = DateTime.now();
+
       final updateResult = await ref.read(tripsRepositoryProvider).updateLocation(<String, dynamic>{
         'latitude': pos.latitude,
         'longitude': pos.longitude,
@@ -301,6 +437,33 @@ class TripNotifier extends Notifier<TripState> {
         );
       }
     });
+    _startGpsCheck();
+  }
+
+  void _startGpsCheck() {
+    _gpsCheckTimer?.cancel();
+    _gpsCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (state is! TripActive) return;
+      final lost = DateTime.now().difference(_lastGpsAt).inSeconds > 60;
+      final current = state as TripActive;
+      if (current.gpsLost != lost) {
+        state = current.copyWith(gpsLost: lost);
+      }
+    });
+  }
+
+  void _startOccupancyPolling(int routeId) {
+    _occupancyPollTimer?.cancel();
+
+    Future<void> fetch() async {
+      final result = await ref.read(reportsRepositoryProvider).getOccupancy(routeId);
+      if (result is Success<String?> && state is TripActive) {
+        state = (state as TripActive).copyWith(occupancyState: result.data);
+      }
+    }
+
+    fetch();
+    _occupancyPollTimer = Timer.periodic(const Duration(minutes: 2), (_) => fetch());
   }
 
   void _startMonitors(TripActive activeState, int? destinationStopId) {
@@ -315,25 +478,16 @@ class TripNotifier extends Notifier<TripState> {
         }
       }
       if (destination != null) {
-        _dropoffMonitor = DropoffMonitor(
-          destination: destination,
-          onPrepare: () {
-            if (state is! TripActive) return;
-            final active = state as TripActive;
-            state = active.copyWith(dropoffAlert: DropoffAlert.prepare);
-          },
-          onAlight: () {
-            if (state is! TripActive) return;
-            final active = state as TripActive;
-            state = active.copyWith(dropoffAlert: DropoffAlert.alight);
-            HapticFeedback.vibrate();
-          },
-          onMissed: () {
-            if (state is! TripActive) return;
-            final active = state as TripActive;
-            state = active.copyWith(dropoffAlert: DropoffAlert.missed);
-          },
-        )..start();
+        final authState = ref.read(authNotifierProvider);
+        final isPremium = authState is Authenticated &&
+            (authState.user.hasActivePremium || authState.user.role == 'admin');
+
+        if (isPremium) {
+          _startDropoffMonitor(destination, activeState.stops);
+        } else {
+          state = (state as TripActive).copyWith(dropoffPrompt: true);
+          _pendingDropoffDestination = destination;
+        }
       }
     }
 
@@ -342,6 +496,13 @@ class TripNotifier extends Notifier<TripState> {
         if (state is TripActive) {
           state = (state as TripActive).copyWith(showInactivityModal: true);
         }
+      },
+      onSuspicious: () {
+        if (state is TripActive) {
+          state = (state as TripActive)
+              .copyWith(showInactivityModal: false, showSuspiciousModal: true);
+        }
+        Future<void>.delayed(const Duration(seconds: 5), () => endTrip());
       },
       onAutoEnd: () {
         unawaited(endTrip());
@@ -353,16 +514,15 @@ class TripNotifier extends Notifier<TripState> {
       onResolve: (reportId) => _resolveReport(reportId),
     )..start();
 
-    if (activeState.stops.isNotEmpty) {
-      _desvioMonitor = DesvioMonitor(
-        stops: activeState.stops,
-        onDesvio: () {
-          if (state is TripActive) {
-            state = (state as TripActive).copyWith(desvioDetected: true);
-          }
-        },
-      )..start();
-    }
+    _desvioMonitor = DesvioMonitor(
+      geometry: activeState.route.geometry,
+      stops: activeState.stops,
+      onDesvio: () {
+        if (state is TripActive) {
+          state = (state as TripActive).copyWith(desvioDetected: true);
+        }
+      },
+    )..start();
   }
 
   Future<void> _resolveReport(int reportId) async {
@@ -393,6 +553,9 @@ class TripNotifier extends Notifier<TripState> {
   void _disposeMonitorsOnly() {
     _dropoffMonitor?.dispose();
     _dropoffMonitor = null;
+    _pendingDropoffDestination = null;
+    _occupancyCooldownEnd = null;
+    _occupancyCredited.clear();
 
     _inactivityMonitor?.dispose();
     _inactivityMonitor = null;
@@ -407,6 +570,10 @@ class TripNotifier extends Notifier<TripState> {
   void _disposeMonitorsAndTimers() {
     _locationTimer?.cancel();
     _locationTimer = null;
+    _gpsCheckTimer?.cancel();
+    _gpsCheckTimer = null;
+    _occupancyPollTimer?.cancel();
+    _occupancyPollTimer = null;
     _disposeMonitorsOnly();
   }
 }

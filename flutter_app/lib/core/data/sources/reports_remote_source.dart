@@ -43,4 +43,9 @@ class ReportsRemoteSource {
     final response = await _dio.patch(ApiPaths.reportResolve(reportId));
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> getOccupancy(int routeId) async {
+    final response = await _dio.get(ApiPaths.reportsOccupancy(routeId));
+    return response.data as Map<String, dynamic>;
+  }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/l10n/strings.dart';
+import '../planner/providers/planner_notifier.dart';
 import '../trip/providers/trip_notifier.dart';
 import '../trip/providers/trip_state.dart';
 
@@ -54,7 +55,12 @@ class MainShell extends ConsumerWidget {
             label: AppStrings.tabProfile,
           ),
         ],
-        onTap: (index) => context.go(_tabs[index]),
+        onTap: (index) {
+          if (index == 0) {
+            ref.read(plannerNotifierProvider.notifier).reset();
+          }
+          context.go(_tabs[index]);
+        },
       ),
     );
   }

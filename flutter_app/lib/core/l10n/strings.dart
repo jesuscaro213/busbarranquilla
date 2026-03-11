@@ -182,4 +182,64 @@ abstract final class AppStrings {
   static const mapPickConfirm = 'Confirmar punto';
   static const mapPickGeocoding = 'Identificando dirección...';
   static const mapPickError = 'No se pudo identificar el punto. Intenta de nuevo.';
+
+  // Boarding map preview
+  static const boardingPickOnMap = 'Seleccionar en mapa';
+  static const boardingOriginLabel = 'Tu posición';
+  static const boardingDestLabel = 'Bajada';
+  static const boardingPreviewTitle = 'Recorrido de la ruta';
+  static const boardingPreviewConfirm = 'Me monté en este bus';
+  static const boardingPreviewLoading = 'Cargando recorrido...';
+  static const boardingPreviewNoGeometry = 'Sin recorrido disponible';
+
+  // Splash screen
+  static const splashTagline = 'Barranquilla en tiempo real';
+  static const splashLoading = 'Cargando...';
+
+  // Google sign-in
+  static const loginWithGoogle = 'Continuar con Google';
+  static const googleSignInError = 'No se pudo iniciar sesión con Google';
+  static const googleSignInCancelled = 'Inicio de sesión cancelado';
+
+  static const String ok = 'OK';
+  static const String gpsLostBanner = 'GPS perdido — verifica tu señal';
+  static const String boardingDistanceTitle = 'Estás lejos de esta ruta';
+  static const String boardingDistanceBody =
+      'Pareces estar a más de 800 m de la ruta. ¿Seguro que quieres subir?';
+  static const String boardingDistanceConfirm = 'Sí, subir igual';
+  static const String cancel = 'Cancelar';
+  static const String occupancyLleno = '🔴 Bus lleno';
+  static const String occupancyDisponible = '🟢 Hay sillas';
+
+  // Suspicious inactivity
+  static const String suspiciousTitle = 'Viaje cerrado por inactividad';
+  static const String suspiciousBody =
+      'No detectamos movimiento por mucho tiempo. El viaje fue cerrado automáticamente.';
+
+  // Dropoff prompt
+  static const String dropoffPromptTitle = 'Activar alertas de bajada';
+  static const String dropoffPromptBody =
+      'Te avisaremos cuando estés cerca de tu parada. Cuesta 5 créditos por viaje.';
+  static const String dropoffPromptDecline = 'No, gracias';
+  static const String dropoffPromptAccept = 'Activar (5 créditos)';
+
+  // Onboarding
+  static const onboardingSkip = 'Omitir';
+  static const onboardingNext = 'Siguiente';
+  static const onboardingStart = 'Empezar';
+
+  static const onboarding1Title = '¿Dónde está el bus?';
+  static const onboarding1Body =
+      'MiBus te muestra en tiempo real dónde están los buses de Barranquilla, '
+      'reportados por los mismos pasajeros.';
+
+  static const onboarding2Title = 'Tú eres el GPS';
+  static const onboarding2Body =
+      'Cuando te subes al bus, transmites tu ubicación en vivo. '
+      'Otros pasajeros te ven moverse en el mapa y saben que el bus viene.';
+
+  static const onboarding3Title = 'Gana créditos';
+  static const onboarding3Body =
+      'Reportar trancones, confirmar reportes y completar viajes te da créditos. '
+      'Úsalos para activar alertas de bajada y más.';
 }

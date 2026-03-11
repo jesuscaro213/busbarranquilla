@@ -30,6 +30,7 @@ class ActiveTripScreen extends ConsumerStatefulWidget {
 class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   Timer? _ticker;
   Duration _duration = Duration.zero;
+  bool _suspiciousDialogShown = false;
 
   @override
   void initState() {
@@ -67,6 +68,54 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               ref.read(tripNotifierProvider.notifier).endTrip();
             },
             child: const Text(AppStrings.tripEndButton),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDropoffPrompt() {
+    final notifier = ref.read(tripNotifierProvider.notifier);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.dropoffPromptTitle),
+        content: const Text(AppStrings.dropoffPromptBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              notifier.dismissDropoffPrompt();
+            },
+            child: const Text(AppStrings.dropoffPromptDecline),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              notifier.activateDropoffAlerts();
+            },
+            child: const Text(AppStrings.dropoffPromptAccept),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuspiciousDialog() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.suspiciousTitle),
+        content: const Text(AppStrings.suspiciousBody),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(tripNotifierProvider.notifier).dismissSuspiciousModal();
+            },
+            child: const Text(AppStrings.ok),
           ),
         ],
       ),
@@ -141,6 +190,26 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
       }
       if (next.desvioDetected && prev?.desvioDetected != true) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _showDesvioDialog());
+      }
+      if (next.dropoffPrompt && prev?.dropoffPrompt != true) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _showDropoffPrompt());
+      }
+      if (next.showSuspiciousModal && prev?.showSuspiciousModal != true) {
+        if (!_suspiciousDialogShown) {
+          _suspiciousDialogShown = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _showSuspiciousDialog());
+        }
+      }
+      if (!next.showSuspiciousModal) {
+        _suspiciousDialogShown = false;
+      }
+      if (next.reportError != null && prev?.reportError != next.reportError) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AppSnackbar.show(context, next.reportError!, SnackbarType.error);
+            ref.read(tripNotifierProvider.notifier).clearReportError();
+          }
+        });
       }
     });
 
@@ -236,6 +305,18 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              if (active.gpsLost) ...<Widget>[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  color: Colors.orange.shade700,
+                  child: const Text(
+                    AppStrings.gpsLostBanner,
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
               if (active.dropoffAlert != null) ...<Widget>[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -257,6 +338,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                   Text('${AppStrings.tripCreditsLabel}: ${active.trip.creditsEarned}'),
                 ],
               ),
+              if (active.occupancyState != null) ...<Widget>[
+                const SizedBox(height: 6),
+                _OccupancyBadge(state: active.occupancyState!),
+              ],
               const SizedBox(height: 10),
               SizedBox(
                 height: 260,
@@ -336,6 +421,36 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         label: const Text(AppStrings.tripReportFab),
         icon: const Icon(Icons.report),
       ),
+    );
+  }
+}
+
+class _OccupancyBadge extends StatelessWidget {
+  final String state;
+
+  const _OccupancyBadge({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLleno = state == 'lleno';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(
+          isLleno ? Icons.circle : Icons.circle_outlined,
+          size: 10,
+          color: isLleno ? Colors.red : Colors.green,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          isLleno ? AppStrings.occupancyLleno : AppStrings.occupancyDisponible,
+          style: TextStyle(
+            fontSize: 12,
+            color: isLleno ? Colors.red : Colors.green,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

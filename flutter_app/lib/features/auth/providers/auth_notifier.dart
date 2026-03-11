@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../../core/data/repositories/auth_repository.dart';
 import '../../../core/error/result.dart';
+import '../../../core/l10n/strings.dart';
 import 'auth_state.dart';
 
 class AuthNotifier extends Notifier<AuthState> {
@@ -62,6 +64,36 @@ class AuthNotifier extends Notifier<AuthState> {
     state = const AuthLoading();
     await ref.read(authRepositoryProvider).logout();
     state = const Unauthenticated();
+  }
+
+  Future<void> loginWithGoogle() async {
+    state = const AuthLoading();
+
+    try {
+      final googleSignIn = GoogleSignIn();
+      final account = await googleSignIn.signIn();
+      if (account == null) {
+        state = const Unauthenticated();
+        return;
+      }
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null) {
+        state = const AuthErrorState(AppStrings.googleSignInError);
+        return;
+      }
+
+      final result = await ref.read(authRepositoryProvider).loginWithGoogle(idToken);
+      switch (result) {
+        case Success():
+          await _refreshFromProfile();
+        case Failure(error: final error):
+          state = AuthErrorState(error.message);
+      }
+    } catch (_) {
+      state = const AuthErrorState(AppStrings.googleSignInError);
+    }
   }
 
   Future<void> _refreshFromProfile() async {

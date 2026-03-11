@@ -25,6 +25,11 @@ final class TripActive extends TripState {
   final DropoffAlert? dropoffAlert;
   final bool showInactivityModal;
   final bool desvioDetected;
+  final bool dropoffPrompt;
+  final bool showSuspiciousModal;
+  final String? reportError;
+  final bool gpsLost;
+  final String? occupancyState;
 
   const TripActive({
     required this.trip,
@@ -34,6 +39,11 @@ final class TripActive extends TripState {
     this.dropoffAlert,
     this.showInactivityModal = false,
     this.desvioDetected = false,
+    this.dropoffPrompt = false,
+    this.showSuspiciousModal = false,
+    this.reportError,
+    this.gpsLost = false,
+    this.occupancyState,
   });
 
   TripActive copyWith({
@@ -42,17 +52,30 @@ final class TripActive extends TripState {
     List<Stop>? stops,
     List<Report>? reports,
     DropoffAlert? dropoffAlert,
+    bool clearDropoffAlert = false,
     bool? showInactivityModal,
     bool? desvioDetected,
+    bool? dropoffPrompt,
+    bool? showSuspiciousModal,
+    String? reportError,
+    bool clearReportError = false,
+    bool? gpsLost,
+    String? occupancyState,
+    bool clearOccupancyState = false,
   }) {
     return TripActive(
       trip: trip ?? this.trip,
       route: route ?? this.route,
       stops: stops ?? this.stops,
       reports: reports ?? this.reports,
-      dropoffAlert: dropoffAlert ?? this.dropoffAlert,
+      dropoffAlert: clearDropoffAlert ? null : (dropoffAlert ?? this.dropoffAlert),
       showInactivityModal: showInactivityModal ?? this.showInactivityModal,
       desvioDetected: desvioDetected ?? this.desvioDetected,
+      dropoffPrompt: dropoffPrompt ?? this.dropoffPrompt,
+      showSuspiciousModal: showSuspiciousModal ?? this.showSuspiciousModal,
+      reportError: clearReportError ? null : (reportError ?? this.reportError),
+      gpsLost: gpsLost ?? this.gpsLost,
+      occupancyState: clearOccupancyState ? null : (occupancyState ?? this.occupancyState),
     );
   }
 }

@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/l10n/strings.dart';
+import 'core/storage/onboarding_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_notifier.dart';
 import 'features/auth/providers/auth_state.dart';
 import 'features/auth/screens/login_screen.dart';
+import 'features/auth/screens/onboarding_screen.dart';
 import 'features/auth/screens/register_screen.dart';
+import 'features/auth/screens/splash_screen.dart';
 import 'features/map/screens/map_pick_screen.dart';
 import 'features/map/screens/map_screen.dart';
 import 'features/planner/screens/planner_screen.dart';
@@ -20,8 +23,13 @@ import 'features/trip/screens/boarding_confirm_screen.dart';
 import 'features/trip/screens/boarding_screen.dart';
 import 'features/trip/screens/stop_select_screen.dart';
 
+final onboardingDoneProvider = FutureProvider<bool>((ref) async {
+  return ref.read(onboardingStorageProvider).isDone();
+});
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
+  final onboardingAsync = ref.watch(onboardingDoneProvider);
 
   return GoRouter(
     initialLocation: '/map',
@@ -29,19 +37,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isGoingToAuth =
           state.matchedLocation == '/login' || state.matchedLocation == '/register';
       final isLoading = state.matchedLocation == '/loading';
+      final isOnboarding = state.matchedLocation == '/onboarding';
+
+      final onboardingDone = onboardingAsync.valueOrNull ?? true;
+      if (!onboardingDone && !isOnboarding) return '/onboarding';
 
       return switch (authState) {
         AuthInitial() || AuthLoading() => isLoading ? null : '/loading',
-        Authenticated() => isLoading || isGoingToAuth ? '/map' : null,
+        Authenticated() => isLoading || isGoingToAuth || isOnboarding ? '/map' : null,
         Unauthenticated() || AuthErrorState() => isGoingToAuth ? null : '/login',
       };
     },
     routes: <RouteBase>[
       GoRoute(
         path: '/loading',
-        builder: (BuildContext context, GoRouterState state) => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        ),
+        builder: (BuildContext context, GoRouterState state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding',
+        builder: (BuildContext context, GoRouterState state) => const OnboardingScreen(),
       ),
       GoRoute(
         path: '/login',
@@ -50,10 +64,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/register',
         builder: (BuildContext context, GoRouterState state) => const RegisterScreen(),
-      ),
-      GoRoute(
-        path: '/trip/boarding',
-        builder: (BuildContext context, GoRouterState state) => const BoardingScreen(),
       ),
       GoRoute(
         path: '/trip/confirm',
@@ -113,6 +123,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/trip',
             builder: (BuildContext context, GoRouterState state) => const ActiveTripScreen(),
+          ),
+          GoRoute(
+            path: '/trip/boarding',
+            builder: (BuildContext context, GoRouterState state) => const BoardingScreen(),
           ),
           GoRoute(
             path: '/profile',

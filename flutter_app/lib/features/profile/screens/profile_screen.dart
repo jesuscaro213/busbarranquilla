@@ -133,14 +133,14 @@ class _ProfileReadyView extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
-                  onPressed: () => context.go('/profile/credits'),
+                  onPressed: () => context.push('/profile/credits'),
                   child: const Text(AppStrings.viewHistory),
                 ),
               ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
-                  onPressed: () => context.go('/profile/trips'),
+                  onPressed: () => context.push('/profile/trips'),
                   child: const Text(AppStrings.tripHistoryLink),
                 ),
               ),

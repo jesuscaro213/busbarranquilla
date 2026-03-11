@@ -74,6 +74,18 @@ class ReportsRepository {
       return const Failure<void>(UnknownError());
     }
   }
+
+  Future<Result<String?>> getOccupancy(int routeId) async {
+    try {
+      final data = await _source.getOccupancy(routeId);
+      final occupancyState = data['state'] as String?;
+      return Success<String?>(occupancyState);
+    } on DioException catch (e) {
+      return Failure<String?>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<String?>(UnknownError());
+    }
+  }
 }
 
 final reportsRepositoryProvider = Provider<ReportsRepository>((ref) {

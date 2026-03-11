@@ -160,6 +160,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 onPressed: isLoading ? null : _submit,
               ),
               const SizedBox(height: 12),
+              const _OrDivider(),
+              const SizedBox(height: 12),
+              _GoogleSignInButton(
+                isLoading: isLoading,
+                onPressed: isLoading
+                    ? null
+                    : () => ref.read(authNotifierProvider.notifier).loginWithGoogle(),
+              ),
+              const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
@@ -173,6 +182,58 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        const Expanded(child: Divider()),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            'o',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const Expanded(child: Divider()),
+      ],
+    );
+  }
+}
+
+class _GoogleSignInButton extends StatelessWidget {
+  final bool isLoading;
+  final VoidCallback? onPressed;
+
+  const _GoogleSignInButton({required this.isLoading, this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Image.network(
+            'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(Icons.g_mobiledata, size: 22),
+          ),
+          const SizedBox(width: 10),
+          const Text(AppStrings.loginWithGoogle),
+        ],
       ),
     );
   }

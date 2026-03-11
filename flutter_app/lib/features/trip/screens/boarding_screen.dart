@@ -12,6 +12,7 @@ import '../../../shared/widgets/app_text_field.dart';
 import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_code_badge.dart';
+import '../widgets/route_preview_sheet.dart';
 
 class BoardingScreen extends ConsumerStatefulWidget {
   const BoardingScreen({super.key});
@@ -82,8 +83,22 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
     }
   }
 
-  void _goToConfirm(int routeId) {
-    context.push('/trip/confirm?routeId=$routeId');
+  void _showRoutePreview(BusRoute route) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext ctx) => RoutePreviewSheet(
+        route: route,
+        onConfirm: () {
+          Navigator.of(ctx).pop();
+          context.push('/trip/confirm?routeId=${route.id}');
+        },
+      ),
+    );
   }
 
   @override
@@ -128,7 +143,7 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
                     final route = _nearbyRoutes[index];
                     return _NearbyRouteCard(
                       route: route,
-                      onTap: () => _goToConfirm(route.id),
+                      onTap: () => _showRoutePreview(route),
                     );
                   },
                 ),
@@ -151,7 +166,7 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
                   final route = filtered[index];
 
                   return ListTile(
-                    onTap: () => _goToConfirm(route.id),
+                    onTap: () => _showRoutePreview(filtered[index]),
                     title: Text(route.name),
                     subtitle: Text(route.companyName ?? route.company ?? ''),
                     leading: RouteCodeBadge(code: route.code),

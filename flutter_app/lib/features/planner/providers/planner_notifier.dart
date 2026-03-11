@@ -93,6 +93,12 @@ class PlannerNotifier extends Notifier<PlannerState> {
     );
   }
 
+  void reset() {
+    _selectedOrigin = null;
+    _selectedDest = null;
+    state = const PlannerIdle();
+  }
+
   Future<List<NominatimResult>> searchAddress(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.length < 3) {

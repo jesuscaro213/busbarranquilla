@@ -4,6 +4,7 @@ abstract final class ApiPaths {
   static const login = '/api/auth/login';
   static const register = '/api/auth/register';
   static const profile = '/api/auth/profile';
+  static const authGoogle = '/api/auth/google';
 
   static const routes = '/api/routes';
   static const routesNearby = '/api/routes/nearby';
@@ -27,6 +28,7 @@ abstract final class ApiPaths {
   static const tripHistory = '/api/trips/history';
 
   static String routeActivity(int id) => '/api/routes/$id/activity';
+  static String reportsOccupancy(int routeId) => '/api/reports/occupancy/$routeId';
 
   static const creditsBalance = '/api/credits/balance';
   static const creditsHistory = '/api/credits/history';

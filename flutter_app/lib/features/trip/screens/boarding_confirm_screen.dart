@@ -1,6 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/data/repositories/reports_repository.dart';
 import '../../../core/data/repositories/routes_repository.dart';
@@ -12,11 +16,14 @@ import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
 import '../../../core/socket/socket_service.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_activity_badge.dart';
 import '../../../shared/widgets/route_code_badge.dart';
+import '../../../shared/widgets/route_polyline_layer.dart';
+import '../../planner/models/nominatim_result.dart';
 import '../providers/trip_notifier.dart';
 import '../providers/trip_state.dart';
 import '../widgets/route_reports_list.dart';
@@ -45,6 +52,8 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
   int? _selectedStopId;
   bool _showStopList = false;
   List<Report> _reports = const <Report>[];
+  LatLng? _userPosition;
+  int? _boardingDistanceWarning;
 
   @override
   void initState() {
@@ -145,6 +154,13 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
       };
       _loading = false;
     });
+
+    // Fetch user position for map display (non-blocking, best-effort)
+    LocationService.getCurrentPosition().then((pos) {
+      if (pos != null && mounted) {
+        setState(() => _userPosition = LatLng(pos.latitude, pos.longitude));
+      }
+    });
   }
 
   Stop? get _selectedStop {
@@ -155,11 +171,25 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     return null;
   }
 
-  Future<void> _confirm() async {
+  Future<void> _confirm({bool force = false}) async {
+    if (!force && _userPosition != null && _route != null) {
+      final dist = _minDistToGeometry(
+        _userPosition!.latitude,
+        _userPosition!.longitude,
+        _route!.geometry,
+      );
+      if (dist != null && dist > 800) {
+        setState(() => _boardingDistanceWarning = dist.round());
+        return;
+      }
+    }
+
+    setState(() => _boardingDistanceWarning = null);
+
     await ref.read(tripNotifierProvider.notifier).startTrip(
-          widget.routeId,
-          destinationStopId: _selectedStopId,
-        );
+      widget.routeId,
+      destinationStopId: _selectedStopId,
+    );
     if (!mounted) return;
     final tripState = ref.read(tripNotifierProvider);
     if (tripState is TripActive) {
@@ -167,6 +197,73 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     } else if (tripState is TripError) {
       AppSnackbar.show(context, tripState.message, SnackbarType.error);
     }
+  }
+
+  void _showDistanceWarning() {
+    final dist = _boardingDistanceWarning;
+    if (dist == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.boardingDistanceTitle),
+        content: Text('${AppStrings.boardingDistanceBody} $dist m.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _boardingDistanceWarning = null);
+            },
+            child: const Text(AppStrings.cancel),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _boardingDistanceWarning = null);
+              _confirm(force: true);
+            },
+            child: const Text(AppStrings.boardingDistanceConfirm),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static double? _minDistToGeometry(
+    double userLat,
+    double userLng,
+    List<LatLng> geometry,
+  ) {
+    if (geometry.length < 2) return null;
+    double minDist = double.infinity;
+    for (int i = 0; i < geometry.length - 1; i++) {
+      final d = _distToSegmentMeters(
+        userLat, userLng,
+        geometry[i].latitude, geometry[i].longitude,
+        geometry[i + 1].latitude, geometry[i + 1].longitude,
+      );
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  }
+
+  static double _distToSegmentMeters(
+    double pLat, double pLng,
+    double aLat, double aLng,
+    double bLat, double bLng,
+  ) {
+    final dx = bLat - aLat;
+    final dy = bLng - aLng;
+    final lenSq = dx * dx + dy * dy;
+    if (lenSq == 0) {
+      return LocationService.distanceMeters(pLat, pLng, aLat, aLng);
+    }
+    final t = math.max(
+      0.0,
+      math.min(1.0, ((pLat - aLat) * dx + (pLng - aLng) * dy) / lenSq),
+    );
+    return LocationService.distanceMeters(
+      pLat, pLng, aLat + t * dx, aLng + t * dy,
+    );
   }
 
   @override
@@ -188,6 +285,10 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     final route = _route!;
     final company = route.companyName ?? route.company ?? '';
     final selectedStop = _selectedStop;
+
+    if (_boardingDistanceWarning != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showDistanceWarning());
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text(AppStrings.boardingTitle)),
@@ -224,6 +325,12 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
               ),
               const SizedBox(height: 8),
               RouteActivityBadge(routeId: widget.routeId),
+              const SizedBox(height: 12),
+              _BoardingMapPreview(
+                geometry: route.geometry,
+                userPosition: _userPosition,
+                destinationStop: selectedStop,
+              ),
               if (_reports.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 16),
                 const Divider(),
@@ -252,6 +359,31 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
                 selectedStop: selectedStop,
                 onChangeTap: () => setState(() => _showStopList = !_showStopList),
                 showingList: _showStopList,
+                onPickFromMap: () async {
+                  final result = await context.push<NominatimResult>('/map-pick');
+                  if (result == null || !mounted) return;
+                  if (_stops.isEmpty) return;
+                  Stop? nearest;
+                  double bestDist = double.infinity;
+                  for (final stop in _stops) {
+                    final d = LocationService.distanceMeters(
+                      stop.latitude,
+                      stop.longitude,
+                      result.lat,
+                      result.lng,
+                    );
+                    if (d < bestDist) {
+                      bestDist = d;
+                      nearest = stop;
+                    }
+                  }
+                  if (nearest != null) {
+                    setState(() {
+                      _selectedStopId = nearest!.id;
+                      _showStopList = false;
+                    });
+                  }
+                },
               ),
 
               // Stop list — shown only when user taps Cambiar / Seleccionar
@@ -315,11 +447,13 @@ class _DropoffRow extends StatelessWidget {
   final Stop? selectedStop;
   final VoidCallback onChangeTap;
   final bool showingList;
+  final VoidCallback? onPickFromMap;
 
   const _DropoffRow({
     required this.selectedStop,
     required this.onChangeTap,
     required this.showingList,
+    this.onPickFromMap,
   });
 
   @override
@@ -366,6 +500,17 @@ class _DropoffRow extends StatelessWidget {
               ],
             ),
           ),
+          if (onPickFromMap != null)
+            IconButton(
+              icon: const Icon(Icons.map_outlined, size: 20),
+              tooltip: AppStrings.boardingPickOnMap,
+              onPressed: onPickFromMap,
+              style: IconButton.styleFrom(
+                padding: const EdgeInsets.all(4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
           TextButton(
             onPressed: onChangeTap,
             style: TextButton.styleFrom(
@@ -378,6 +523,102 @@ class _DropoffRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BoardingMapPreview extends StatelessWidget {
+  final List<LatLng> geometry;
+  final LatLng? userPosition;
+  final Stop? destinationStop;
+
+  const _BoardingMapPreview({
+    required this.geometry,
+    this.userPosition,
+    this.destinationStop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<LatLng> points = <LatLng>[
+      if (userPosition != null) userPosition!,
+      if (destinationStop != null)
+        LatLng(destinationStop!.latitude, destinationStop!.longitude),
+      ...geometry,
+    ];
+
+    final LatLng fallbackCenter = userPosition ??
+        (geometry.isNotEmpty ? geometry[geometry.length ~/ 2] : const LatLng(10.9685, -74.7813));
+
+    MapOptions buildOptions() {
+      if (points.length >= 2) {
+        return MapOptions(
+          initialCameraFit: CameraFit.bounds(
+            bounds: LatLngBounds.fromPoints(points),
+            padding: const EdgeInsets.all(40),
+          ),
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
+          ),
+        );
+      }
+      return MapOptions(
+        initialCenter: fallbackCenter,
+        initialZoom: 14,
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        height: 280,
+        child: FlutterMap(
+          options: buildOptions(),
+          children: <Widget>[
+            TileLayer(
+              urlTemplate: AppStrings.osmTileUrl,
+              subdomains: AppStrings.osmTileSubdomains,
+              userAgentPackageName: AppStrings.osmUserAgent,
+            ),
+            if (geometry.isNotEmpty) RoutePolylineLayer(points: geometry),
+            MarkerLayer(
+              markers: <Marker>[
+                if (userPosition != null)
+                  Marker(
+                    point: userPosition!,
+                    width: 32,
+                    height: 32,
+                    child: const Icon(
+                      Icons.my_location,
+                      color: AppColors.success,
+                      size: 28,
+                      shadows: <Shadow>[
+                        Shadow(color: Colors.black26, blurRadius: 4),
+                      ],
+                    ),
+                  ),
+                if (destinationStop != null)
+                  Marker(
+                    point: LatLng(destinationStop!.latitude, destinationStop!.longitude),
+                    width: 36,
+                    height: 36,
+                    child: const Icon(
+                      Icons.location_pin,
+                      color: AppColors.error,
+                      size: 32,
+                      shadows: <Shadow>[
+                        Shadow(color: Colors.black26, blurRadius: 4),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -28,4 +28,12 @@ class AuthRemoteSource {
     final response = await _dio.get(ApiPaths.profile);
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> loginWithGoogle(String idToken) async {
+    final response = await _dio.post(
+      ApiPaths.authGoogle,
+      data: <String, dynamic>{'idToken': idToken},
+    );
+    return response.data as Map<String, dynamic>;
+  }
 }

@@ -87,6 +87,22 @@ class AuthRepository {
       return const Failure<void>(UnknownError());
     }
   }
+
+  Future<Result<void>> loginWithGoogle(String idToken) async {
+    try {
+      final data = await _source.loginWithGoogle(idToken);
+      final token = stringAt(data, 'token');
+      if (token.isEmpty) {
+        return const Failure<void>(AuthError('Token no recibido'));
+      }
+      await _storage.writeToken(token);
+      return const Success<void>(null);
+    } on DioException catch (e) {
+      return Failure<void>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<void>(UnknownError());
+    }
+  }
 }
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {

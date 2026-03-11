@@ -7,6 +7,7 @@ import '../../../core/location/location_service.dart';
 
 class InactivityMonitor {
   final VoidCallback onAsk;
+  final VoidCallback onSuspicious;
   final VoidCallback onAutoEnd;
 
   Timer? _timer;
@@ -14,9 +15,11 @@ class InactivityMonitor {
   Position? _lastPosition;
   DateTime _lastMoveAt = DateTime.now();
   bool _asked = false;
+  bool _hasBeenWarned = false;
 
   InactivityMonitor({
     required this.onAsk,
+    required this.onSuspicious,
     required this.onAutoEnd,
   });
 
@@ -27,6 +30,7 @@ class InactivityMonitor {
 
   void markResponded() {
     _asked = false;
+    _hasBeenWarned = true;
     _autoEndTimer?.cancel();
     _lastMoveAt = DateTime.now();
   }
@@ -42,7 +46,6 @@ class InactivityMonitor {
         pos.latitude,
         pos.longitude,
       );
-
       if (movedMeters > 50) {
         _lastMoveAt = DateTime.now();
         _asked = false;
@@ -55,11 +58,24 @@ class InactivityMonitor {
     _lastPosition = pos;
 
     final inactiveSeconds = DateTime.now().difference(_lastMoveAt).inSeconds;
-    if (!_asked && inactiveSeconds >= 600) {
-      _asked = true;
-      onAsk();
-      _autoEndTimer?.cancel();
-      _autoEndTimer = Timer(const Duration(seconds: 120), onAutoEnd);
+
+    if (inactiveSeconds >= 1800) {
+      if (!_asked) {
+        _asked = true;
+        onSuspicious();
+      }
+    } else if (inactiveSeconds >= 600) {
+      if (_hasBeenWarned) {
+        if (!_asked) {
+          _asked = true;
+          onSuspicious();
+        }
+      } else if (!_asked) {
+        _asked = true;
+        onAsk();
+        _autoEndTimer?.cancel();
+        _autoEndTimer = Timer(const Duration(seconds: 120), onAutoEnd);
+      }
     }
   }
 

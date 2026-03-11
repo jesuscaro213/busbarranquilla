@@ -146,6 +146,16 @@ abstract final class AppStrings {
   static const activityLastSeenMin = 'min';
   static const activityNone = 'Sin actividad reciente';
   static const activityLoading = 'Verificando actividad...';
+  static const String activityShowTimeline = 'Ver actividad reciente';
+  static const String activityHideTimeline = 'Ocultar actividad';
+  static const String activityEventBoarding = 'Subió';
+  static const String activityEventAlighting = 'Bajó';
+  static const String activityEventReport = 'Reporte';
+  static const String activityEventJustNow = 'ahora mismo';
+
+  // Nearby routes
+  static const String nearbyRefreshTooltip = 'Actualizar rutas cercanas';
+  static const String nearbyBoardButton = 'Subir a este bus';
 
   // Referral code
   static const referralCodeLabel = 'Código de referido (opcional)';

@@ -1,9 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 
+import '../../../core/data/repositories/routes_repository.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/plan_result.dart';
+import '../../../core/domain/models/route_activity.dart';
+import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
 import '../../../core/theme/app_colors.dart';
@@ -13,6 +19,7 @@ import '../../../shared/widgets/empty_view.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_activity_badge.dart';
 import '../../../shared/widgets/route_code_badge.dart';
+import '../../map/providers/map_active_positions_provider.dart';
 import '../models/nominatim_result.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/planner_notifier.dart';
@@ -29,6 +36,8 @@ class PlannerScreen extends ConsumerStatefulWidget {
 
 class _PlannerScreenState extends ConsumerState<PlannerScreen> {
   bool _didInitLocation = false;
+  bool _refreshingNearby = false;
+  int? _selectedNearbyRouteId;
 
   @override
   void didChangeDependencies() {
@@ -36,6 +45,13 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     if (_didInitLocation) return;
     _didInitLocation = true;
     Future<void>(_setCurrentLocationAsOrigin);
+  }
+
+  @override
+  void dispose() {
+    // Clear active positions when leaving the planner
+    ref.read(mapActivePositionsProvider.notifier).state = const <LatLng>[];
+    super.dispose();
   }
 
   Future<void> _setCurrentLocationAsOrigin() async {
@@ -69,6 +85,24 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     );
   }
 
+  Future<void> _refreshNearby() async {
+    final origin = ref.read(plannerNotifierProvider.notifier).selectedOrigin;
+    if (origin == null) return;
+    setState(() => _refreshingNearby = true);
+    await ref.read(plannerNotifierProvider.notifier).loadNearbyForOrigin(origin);
+    if (mounted) setState(() => _refreshingNearby = false);
+  }
+
+  Future<void> _updateActivePositions(int routeId) async {
+    final result =
+        await ref.read(routesRepositoryProvider).getActivity(routeId);
+    if (!mounted) return;
+    final positions = result is Success<RouteActivity>
+        ? result.data.activePositions
+        : const <LatLng>[];
+    ref.read(mapActivePositionsProvider.notifier).state = positions;
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(plannerNotifierProvider);
@@ -90,6 +124,14 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
       PlannerIdle(nearbyRoutes: final routes, selectedDest: null) => routes,
       _ => const <BusRoute>[],
     };
+
+    // If the nearby list no longer contains the selected route, deselect it.
+    // Direct assignment (no setState) is safe here because we're in build and
+    // the value is only read later in the same frame.
+    if (_selectedNearbyRouteId != null &&
+        nearbyRoutes.every((r) => r.id != _selectedNearbyRouteId)) {
+      _selectedNearbyRouteId = null;
+    }
 
     final isLoading = state is PlannerLoading;
     final List<PlanResult> results =
@@ -189,12 +231,27 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
               ),
               if (nearbyRoutes.isNotEmpty && state is! PlannerResults) ...<Widget>[
                 const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    AppStrings.nearbyRoutesTitle,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: <Widget>[
+                    Text(
+                      AppStrings.nearbyRoutesTitle,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    IconButton(
+                      icon: _refreshingNearby
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh, size: 20),
+                      tooltip: AppStrings.nearbyRefreshTooltip,
+                      onPressed: _refreshingNearby ? null : _refreshNearby,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Align(
@@ -207,7 +264,15 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 const SizedBox(height: 6),
                 ...nearbyRoutes.map(
                   (route) => InkWell(
-                    onTap: () => context.push('/trip/confirm?routeId=${route.id}'),
+                    onTap: () {
+                      setState(() {
+                        _selectedNearbyRouteId =
+                            _selectedNearbyRouteId == route.id ? null : route.id;
+                      });
+                      if (_selectedNearbyRouteId == route.id) {
+                        unawaited(_updateActivePositions(route.id));
+                      }
+                    },
                     borderRadius: BorderRadius.circular(10),
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -216,38 +281,58 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                         border: Border.all(color: Theme.of(context).dividerColor),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          RouteCodeBadge(code: route.code),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(route.name, style: Theme.of(context).textTheme.bodyMedium),
-                                if ((route.companyName ?? route.company ?? '').isNotEmpty)
-                                  Text(
-                                    route.companyName ?? route.company ?? '',
-                                    style: Theme.of(context).textTheme.bodySmall,
+                          Row(
+                            children: <Widget>[
+                              RouteCodeBadge(code: route.code),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(route.name, style: Theme.of(context).textTheme.bodyMedium),
+                                    if ((route.companyName ?? route.company ?? '').isNotEmpty)
+                                      Text(
+                                        route.companyName ?? route.company ?? '',
+                                        style: Theme.of(context).textTheme.bodySmall,
+                                      ),
+                                    const SizedBox(height: 4),
+                                    RouteActivityBadge(routeId: route.id),
+                                  ],
+                                ),
+                              ),
+                              if (route.distanceMeters != null) ...<Widget>[
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${route.distanceMeters} m',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.forDistance(route.distanceMeters!),
+                                    fontWeight: FontWeight.w600,
                                   ),
-                                const SizedBox(height: 4),
-                                RouteActivityBadge(routeId: route.id),
+                                ),
+                              ],
+                              const SizedBox(width: 4),
+                              const Icon(Icons.chevron_right, size: 18),
+                            ],
+                          ),
+                          if (_selectedNearbyRouteId == route.id) ...<Widget>[
+                            const SizedBox(height: 10),
+                            const Divider(height: 1),
+                            const SizedBox(height: 10),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: <Widget>[
+                                FilledButton.icon(
+                                  onPressed: () => context.push('/trip/confirm?routeId=${route.id}'),
+                                  icon: const Icon(Icons.directions_bus, size: 16),
+                                  label: const Text(AppStrings.nearbyBoardButton),
+                                ),
                               ],
                             ),
-                          ),
-                          if (route.distanceMeters != null) ...<Widget>[
-                            const SizedBox(width: 8),
-                            Text(
-                              '${route.distanceMeters} m',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.forDistance(route.distanceMeters!),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
                           ],
-                          const SizedBox(width: 4),
-                          const Icon(Icons.chevron_right, size: 18),
                         ],
                       ),
                     ),
@@ -276,11 +361,14 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                             final result = results[index];
                             return PlanResultCard(
                               result: result,
-                              onSelect: () => context.push(
-                                '/trip/confirm?routeId=${result.id}'
-                                '&destLat=${result.nearestStop.latitude}'
-                                '&destLng=${result.nearestStop.longitude}',
-                              ),
+                              onSelect: () {
+                                unawaited(_updateActivePositions(result.id));
+                                context.push(
+                                  '/trip/confirm?routeId=${result.id}'
+                                  '&destLat=${result.nearestStop.latitude}'
+                                  '&destLng=${result.nearestStop.longitude}',
+                                );
+                              },
                             );
                           },
                         ),

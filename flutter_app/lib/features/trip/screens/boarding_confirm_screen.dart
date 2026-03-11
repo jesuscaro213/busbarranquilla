@@ -54,6 +54,7 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
   List<Report> _reports = const <Report>[];
   LatLng? _userPosition;
   int? _boardingDistanceWarning;
+  bool _distanceDialogPending = false;
 
   @override
   void initState() {
@@ -286,8 +287,12 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     final company = route.companyName ?? route.company ?? '';
     final selectedStop = _selectedStop;
 
-    if (_boardingDistanceWarning != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showDistanceWarning());
+    if (_boardingDistanceWarning != null && !_distanceDialogPending) {
+      _distanceDialogPending = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _distanceDialogPending = false;
+        _showDistanceWarning();
+      });
     }
 
     return Scaffold(

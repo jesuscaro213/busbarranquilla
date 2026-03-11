@@ -10,6 +10,7 @@ import '../../../core/storage/secure_storage.dart';
 import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_polyline_layer.dart';
+import '../providers/map_active_positions_provider.dart';
 import '../providers/map_provider.dart';
 import '../providers/map_state.dart';
 import '../../trip/providers/trip_notifier.dart';
@@ -34,6 +35,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     super.initState();
     Future<void>(() async {
       final token = await ref.read(secureStorageProvider).readToken();
+      if (!mounted) return;
       if (token != null && token.isNotEmpty) {
         ref.read(socketServiceProvider).connect(token);
       }
@@ -90,6 +92,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ActiveRouteBusLayer(routeId: selectedRoute.id),
               if (ready.userPosition != null)
                 UserMarkerLayer(position: ready.userPosition!, isOnTrip: isOnTrip),
+              Consumer(
+                builder: (context, ref, _) {
+                  final activePositions = ref.watch(mapActivePositionsProvider);
+                  if (activePositions.isEmpty) return const SizedBox.shrink();
+                  return MarkerLayer(
+                    markers: activePositions.map((pos) => Marker(
+                      point: pos,
+                      width: 32,
+                      height: 32,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.amber,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.directions_bus, color: Colors.white, size: 18),
+                      ),
+                    )).toList(),
+                  );
+                },
+              ),
             ],
           ),
           Positioned(

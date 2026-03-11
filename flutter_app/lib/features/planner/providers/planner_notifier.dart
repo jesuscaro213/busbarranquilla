@@ -43,11 +43,11 @@ class PlannerNotifier extends Notifier<PlannerState> {
   NominatimResult? get selectedOrigin => _selectedOrigin;
   NominatimResult? get selectedDest => _selectedDest;
 
-  Future<void> _loadNearbyForOrigin(NominatimResult origin) async {
+  Future<void> loadNearbyForOrigin(NominatimResult origin) async {
     final result = await ref.read(routesRepositoryProvider).nearby(
       lat: origin.lat,
       lng: origin.lng,
-      radius: 0.5,
+      radius: 0.3,
     );
 
     if (result is Success<List<BusRoute>> && state is PlannerIdle) {
@@ -72,7 +72,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
       selectedDest: _selectedDest,
     );
 
-    unawaited(_loadNearbyForOrigin(origin));
+    unawaited(loadNearbyForOrigin(origin));
   }
 
   void setDestination(NominatimResult destination) {
@@ -109,7 +109,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
       final response = await ref.read(nominatimDioProvider).get<List<dynamic>>(
         '/search',
         queryParameters: <String, dynamic>{
-          'q': '$cleanQuery Barranquilla Colombia',
+          'q': '${_normalizeColombianAddress(cleanQuery)} Barranquilla Colombia',
           'format': 'jsonv2',
           'limit': 6,
           'countrycodes': 'co',
@@ -138,6 +138,17 @@ class PlannerNotifier extends Notifier<PlannerState> {
     } catch (_) {
       return const <NominatimResult>[];
     }
+  }
+
+  /// Normalizes Colombian addresses:
+  ///   "Cr 52 N 45-12"  → "Cr 52 #45-12"
+  ///   "Calle 30 N 42"  → "Calle 30 #42"
+  /// The "N" separator (case-insensitive, surrounded by spaces) is replaced with "#".
+  static String _normalizeColombianAddress(String query) {
+    return query.replaceAllMapped(
+      RegExp(r'\s+[Nn]\s+'),
+      (match) => ' #',
+    );
   }
 
   Future<void> planRoute({

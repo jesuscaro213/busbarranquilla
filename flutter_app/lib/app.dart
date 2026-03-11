@@ -39,12 +39,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLoading = state.matchedLocation == '/loading';
       final isOnboarding = state.matchedLocation == '/onboarding';
 
+      // Onboarding takes priority — skip auth redirect entirely until done.
       final onboardingDone = onboardingAsync.valueOrNull ?? true;
-      if (!onboardingDone && !isOnboarding) return '/onboarding';
+      if (!onboardingDone) {
+        return isOnboarding ? null : '/onboarding';
+      }
 
       return switch (authState) {
         AuthInitial() || AuthLoading() => isLoading ? null : '/loading',
-        Authenticated() => isLoading || isGoingToAuth || isOnboarding ? '/map' : null,
+        Authenticated() => isLoading || isGoingToAuth ? '/map' : null,
         Unauthenticated() || AuthErrorState() => isGoingToAuth ? null : '/login',
       };
     },

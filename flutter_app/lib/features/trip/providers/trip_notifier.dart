@@ -535,12 +535,12 @@ class TripNotifier extends Notifier<TripState> {
 
   Future<void> _reloadReports() async {
     if (state is! TripActive) return;
-    final active = state as TripActive;
+    final routeId = (state as TripActive).route.id;
 
-    final reportsResult = await ref.read(reportsRepositoryProvider).getRouteReports(active.route.id);
-    if (reportsResult is Success<List<Report>>) {
+    final reportsResult = await ref.read(reportsRepositoryProvider).getRouteReports(routeId);
+    if (reportsResult is Success<List<Report>> && state is TripActive) {
       final updatedReports = reportsResult.data;
-      state = active.copyWith(reports: updatedReports);
+      state = (state as TripActive).copyWith(reports: updatedReports);
       final monitor = _autoResolveMonitor;
       if (monitor != null) {
         monitor.reports

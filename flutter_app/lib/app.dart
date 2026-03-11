@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/l10n/strings.dart';
-import 'core/storage/onboarding_storage.dart';
+import 'core/storage/onboarding_storage.dart' show onboardingDoneProvider;
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_notifier.dart';
 import 'features/auth/providers/auth_state.dart';
@@ -22,10 +22,6 @@ import 'features/trip/screens/active_trip_screen.dart';
 import 'features/trip/screens/boarding_confirm_screen.dart';
 import 'features/trip/screens/boarding_screen.dart';
 import 'features/trip/screens/stop_select_screen.dart';
-
-final onboardingDoneProvider = FutureProvider<bool>((ref) async {
-  return ref.read(onboardingStorageProvider).isDone();
-});
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
 import '../../domain/models/active_trip.dart';
+import '../../domain/models/trip_end_result.dart';
+import '../../domain/models/trip_history_item.dart';
 import '../../error/app_error.dart';
 import '../../error/result.dart';
 import '../sources/trips_remote_source.dart';
@@ -65,15 +67,27 @@ class TripsRepository {
     }
   }
 
-  Future<Result<ActiveTrip>> end({Map<String, dynamic>? body}) async {
+  Future<Result<TripEndResult>> end({Map<String, dynamic>? body}) async {
     try {
       final data = await _source.end(body: body);
-      final trip = ActiveTrip.fromJson(mapAt(data, 'trip'));
-      return Success<ActiveTrip>(trip);
+      return Success<TripEndResult>(TripEndResult.fromJson(data));
     } on DioException catch (e) {
-      return Failure<ActiveTrip>(mappedErrorFromDio(e));
+      return Failure<TripEndResult>(mappedErrorFromDio(e));
     } catch (_) {
-      return const Failure<ActiveTrip>(UnknownError());
+      return const Failure<TripEndResult>(UnknownError());
+    }
+  }
+  Future<Result<List<TripHistoryItem>>> getHistory() async {
+    try {
+      final data = await _source.getHistory();
+      final items = listAt(data, 'trips')
+          .map(TripHistoryItem.fromJson)
+          .toList(growable: false);
+      return Success<List<TripHistoryItem>>(items);
+    } on DioException catch (e) {
+      return Failure<List<TripHistoryItem>>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<List<TripHistoryItem>>(UnknownError());
     }
   }
 }

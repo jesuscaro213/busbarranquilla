@@ -39,6 +39,7 @@ class AuthRepository {
     required String email,
     required String password,
     String? phone,
+    String? referredByCode,
   }) async {
     try {
       final data = await _source.register(<String, dynamic>{
@@ -46,6 +47,8 @@ class AuthRepository {
         'email': email,
         'password': password,
         if (phone != null) 'phone': phone,
+        if (referredByCode != null && referredByCode.isNotEmpty)
+          'referred_by_code': referredByCode,
       });
 
       final token = stringAt(data, 'token');

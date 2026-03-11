@@ -31,4 +31,9 @@ class TripsRemoteSource {
     final response = await _dio.get(ApiPaths.tripBuses);
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> getHistory() async {
+    final response = await _dio.get(ApiPaths.tripHistory);
+    return response.data as Map<String, dynamic>;
+  }
 }

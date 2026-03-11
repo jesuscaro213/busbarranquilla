@@ -59,7 +59,7 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
       final nearbyResult = await ref.read(routesRepositoryProvider).nearby(
         lat: position.latitude,
         lng: position.longitude,
-        radius: 0.5,
+        radius: 0.3,
       );
       if (nearbyResult is Success<List<BusRoute>>) {
         setState(() {

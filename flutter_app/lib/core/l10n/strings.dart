@@ -118,4 +118,49 @@ abstract final class AppStrings {
   static const notAvailable = '-';
 
   static String agoMinutes(int minutes) => 'Hace $minutes min';
+
+  // Trip summary — distance + bonus
+  static const tripDistanceLabel = 'Distancia';
+  static const tripCompletionBonus = '+5 créditos por completar el viaje';
+  static const tripShortDistance = 'Recorriste menos de 2 km — no se otorgó el bonus de completación';
+  static const tripKmSuffix = 'km';
+  static const tripMetersSuffix = 'm';
+
+  // Trancón resolved notifications
+  static const tranconResolvedWithDuration = 'Trancón resuelto — duró ~';
+  static const tranconResolvedMinutes = ' min';
+  static const tranconResolved = 'El trancón en esta ruta fue resuelto';
+  static const tranconResolvedWaiting = '✅ El trancón en esta ruta se resolvió';
+
+  // Trip history
+  static const tripHistoryTitle = 'Tus últimos viajes';
+  static const tripHistoryEmpty = 'Aún no has hecho ningún viaje.';
+  static const tripHistoryEmptySub = '¡Sube a un bus y empieza!';
+  static const tripHistoryLink = 'Ver mis viajes';
+  static const tripDurationMinutes = 'min';
+
+  // Route activity
+  static const activityUsersActive = 'usuarios activos ahora';
+  static const activityOneUserActive = 'usuario activo ahora';
+  static const activityLastSeen = 'Última actividad hace';
+  static const activityLastSeenMin = 'min';
+  static const activityNone = 'Sin actividad reciente';
+  static const activityLoading = 'Verificando actividad...';
+
+  // Referral code
+  static const referralCodeLabel = 'Código de referido (opcional)';
+  static const referralCodeHint = 'Ej: ABC123';
+  static const referralCodeSection = 'Tu código de referido';
+  static const referralCodeCopied = 'Código copiado al portapapeles';
+  static const referralCodeShare = 'Comparte tu código y gana +25 créditos por cada amigo';
+  static const referralCodeNone = 'Tu código se genera al registrarte';
+
+  // Route update voting
+  static const reportRouteTitle = 'Reportar problema de ruta';
+  static const reportTrancon = 'Hay trancón';
+  static const reportRutaReal = 'Ruta difiere del mapa';
+  static const reportRouteSent = 'Reporte enviado. ¡Gracias!';
+  static const reportRouteError = 'No se pudo enviar el reporte';
+  static const reportTranconDesc = 'El bus está atascado en tráfico';
+  static const reportRutaRealDesc = 'El bus tomó una ruta diferente a la del mapa';
 }

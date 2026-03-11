@@ -30,7 +30,7 @@ class AutoResolveMonitor {
         report.latitude,
         report.longitude,
       );
-      if (meters > 200) {
+      if (meters > 1000) {
         await onResolve(report.id);
       }
     }

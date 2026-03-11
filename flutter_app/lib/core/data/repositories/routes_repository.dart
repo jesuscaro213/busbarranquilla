@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_client.dart';
 import '../../domain/models/bus_route.dart';
 import '../../domain/models/plan_result.dart';
+import '../../domain/models/route_activity.dart';
 import '../../error/app_error.dart';
 import '../../error/result.dart';
 import '../sources/routes_remote_source.dart';
@@ -85,6 +86,27 @@ class RoutesRepository {
       return Failure<List<PlanResult>>(mappedErrorFromDio(e));
     } catch (_) {
       return const Failure<List<PlanResult>>(UnknownError());
+    }
+  }
+  Future<Result<RouteActivity>> getActivity(int id) async {
+    try {
+      final data = await _source.getActivity(id);
+      return Success<RouteActivity>(RouteActivity.fromJson(data));
+    } on DioException catch (e) {
+      return Failure<RouteActivity>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<RouteActivity>(UnknownError());
+    }
+  }
+
+  Future<Result<void>> reportRouteUpdate(int routeId, String tipo) async {
+    try {
+      await _source.reportRouteUpdate(routeId, tipo);
+      return const Success<void>(null);
+    } on DioException catch (e) {
+      return Failure<void>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<void>(UnknownError());
     }
   }
 }

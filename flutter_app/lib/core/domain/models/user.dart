@@ -13,6 +13,7 @@ class User {
   final DateTime? premiumExpiresAt;
   final int reputation;
   final DateTime? createdAt;
+  final String? referralCode;
 
   const User({
     required this.id,
@@ -27,6 +28,7 @@ class User {
     this.premiumExpiresAt,
     required this.reputation,
     this.createdAt,
+    this.referralCode,
   });
 
   bool get hasActivePremium => isPremium || role == 'premium';
@@ -45,6 +47,7 @@ class User {
       premiumExpiresAt: asDateTimeOrNull(json['premium_expires_at']),
       reputation: asInt(json['reputation']),
       createdAt: asDateTimeOrNull(json['created_at']),
+      referralCode: asStringOrNull(json['referral_code']),
     );
   }
 
@@ -62,6 +65,7 @@ class User {
       'premium_expires_at': premiumExpiresAt?.toIso8601String(),
       'reputation': reputation,
       'created_at': createdAt?.toIso8601String(),
+      'referral_code': referralCode,
     };
   }
 
@@ -78,6 +82,7 @@ class User {
     DateTime? premiumExpiresAt,
     int? reputation,
     DateTime? createdAt,
+    String? referralCode,
   }) {
     return User(
       id: id ?? this.id,
@@ -92,6 +97,7 @@ class User {
       premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
       reputation: reputation ?? this.reputation,
       createdAt: createdAt ?? this.createdAt,
+      referralCode: referralCode ?? this.referralCode,
     );
   }
 }

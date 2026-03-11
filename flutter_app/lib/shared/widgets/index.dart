@@ -6,5 +6,6 @@ export 'distance_chip.dart';
 export 'empty_view.dart';
 export 'error_view.dart';
 export 'loading_indicator.dart';
+export 'route_activity_badge.dart';
 export 'route_code_badge.dart';
 export 'route_polyline_layer.dart';

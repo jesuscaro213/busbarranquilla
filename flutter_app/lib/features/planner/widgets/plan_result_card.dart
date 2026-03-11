@@ -5,6 +5,7 @@ import '../../../core/domain/models/plan_result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/distance_chip.dart';
+import '../../../shared/widgets/route_activity_badge.dart';
 import '../../../shared/widgets/route_code_badge.dart';
 import '../providers/favorites_provider.dart';
 
@@ -76,6 +77,8 @@ class PlanResultCard extends ConsumerWidget {
               Text(result.nearestStopName ?? AppStrings.notAvailable),
               if (result.frequencyMinutes != null)
                 Text('${AppStrings.frequencyLabel}: ${result.frequencyMinutes} ${AppStrings.timeUnitMinutes}'),
+              const SizedBox(height: 6),
+              RouteActivityBadge(routeId: result.id),
             ],
           ),
         ),

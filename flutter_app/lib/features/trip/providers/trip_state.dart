@@ -62,3 +62,19 @@ final class TripError extends TripState {
 
   const TripError(this.message);
 }
+
+final class TripEnded extends TripState {
+  final String routeName;
+  final int totalCreditsEarned;
+  final int distanceMeters;
+  final bool completionBonusEarned;
+  final Duration tripDuration;
+
+  const TripEnded({
+    required this.routeName,
+    required this.totalCreditsEarned,
+    required this.distanceMeters,
+    required this.completionBonusEarned,
+    required this.tripDuration,
+  });
+}

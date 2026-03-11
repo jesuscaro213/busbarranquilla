@@ -61,4 +61,16 @@ class RoutesRemoteSource {
 
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> getActivity(int id) async {
+    final response = await _dio.get(ApiPaths.routeActivity(id));
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<void> reportRouteUpdate(int routeId, String tipo) async {
+    await _dio.post(
+      ApiPaths.routeUpdateReport(routeId),
+      data: <String, String>{'tipo': tipo},
+    );
+  }
 }

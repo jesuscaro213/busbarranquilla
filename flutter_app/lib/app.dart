@@ -12,6 +12,7 @@ import 'features/map/screens/map_screen.dart';
 import 'features/planner/screens/planner_screen.dart';
 import 'features/profile/screens/credits_history_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
+import 'features/profile/screens/trip_history_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/trip/screens/active_trip_screen.dart';
 import 'features/trip/screens/boarding_confirm_screen.dart';
@@ -86,6 +87,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/profile/credits',
         builder: (BuildContext context, GoRouterState state) => const CreditsHistoryScreen(),
+      ),
+      GoRoute(
+        path: '/profile/trips',
+        builder: (BuildContext context, GoRouterState state) => const TripHistoryScreen(),
       ),
       ShellRoute(
         builder: (BuildContext context, GoRouterState state, Widget child) {

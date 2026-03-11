@@ -38,6 +38,7 @@ class AuthNotifier extends Notifier<AuthState> {
     required String email,
     required String password,
     String? phone,
+    String? referredByCode,
   }) async {
     state = const AuthLoading();
 
@@ -46,6 +47,7 @@ class AuthNotifier extends Notifier<AuthState> {
       email: email,
       password: password,
       phone: phone,
+      referredByCode: referredByCode,
     );
 
     switch (result) {

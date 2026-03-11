@@ -52,6 +52,9 @@ DateTime? asDateTimeOrNull(dynamic value) {
   return null;
 }
 
+DateTime asDateTime(dynamic value) =>
+    asDateTimeOrNull(value) ?? DateTime.fromMillisecondsSinceEpoch(0);
+
 List<LatLng> asLatLngList(dynamic rawGeometry) {
   if (rawGeometry is! List) return const <LatLng>[];
 

@@ -10,6 +10,7 @@ abstract final class ApiPaths {
   static const routesActiveFeed = '/api/routes/active-feed';
   static const routesPlan = '/api/routes/plan';
   static String routeById(int id) => '/api/routes/$id';
+  static String routeUpdateReport(int id) => '/api/routes/$id/update-report';
   static String routeStops(int id) => '/api/stops/route/$id';
 
   static const reportsNearby = '/api/reports/nearby';
@@ -23,6 +24,9 @@ abstract final class ApiPaths {
   static const tripEnd = '/api/trips/end';
   static const tripCurrent = '/api/trips/current';
   static const tripBuses = '/api/trips/buses';
+  static const tripHistory = '/api/trips/history';
+
+  static String routeActivity(int id) => '/api/routes/$id/activity';
 
   static const creditsBalance = '/api/credits/balance';
   static const creditsHistory = '/api/credits/history';

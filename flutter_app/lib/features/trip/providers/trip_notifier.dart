@@ -9,6 +9,7 @@ import '../../../core/data/repositories/routes_repository.dart';
 import '../../../core/data/repositories/stops_repository.dart';
 import '../../../core/data/repositories/trips_repository.dart';
 import '../../../core/domain/models/active_trip.dart';
+import '../../../core/domain/models/trip_end_result.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/report.dart';
 import '../../../core/domain/models/stop.dart';
@@ -28,6 +29,12 @@ class TripNotifier extends Notifier<TripState> {
   InactivityMonitor? _inactivityMonitor;
   AutoResolveMonitor? _autoResolveMonitor;
   DesvioMonitor? _desvioMonitor;
+
+  void Function(String message)? _onReportResolved;
+
+  void setReportResolvedCallback(void Function(String message) cb) {
+    _onReportResolved = cb;
+  }
 
   @override
   TripState build() {
@@ -147,6 +154,11 @@ class TripNotifier extends Notifier<TripState> {
     }
 
     final active = state as TripActive;
+    final startedAt = active.trip.startedAt;
+    final routeName = active.route.name;
+    final duration = startedAt != null
+        ? DateTime.now().difference(startedAt)
+        : Duration.zero;
 
     _disposeMonitorsAndTimers();
     final socket = ref.read(socketServiceProvider);
@@ -155,8 +167,25 @@ class TripNotifier extends Notifier<TripState> {
     }
     socket.off('route:new_report');
     socket.off('route:report_confirmed');
+    socket.off('route:report_resolved');
 
-    await ref.read(tripsRepositoryProvider).end();
+    final result = await ref.read(tripsRepositoryProvider).end();
+
+    switch (result) {
+      case Success<TripEndResult>(data: final data):
+        state = TripEnded(
+          routeName: routeName,
+          totalCreditsEarned: data.totalCreditsEarned,
+          distanceMeters: data.distanceMeters,
+          completionBonusEarned: data.completionBonusEarned,
+          tripDuration: duration,
+        );
+      case Failure<TripEndResult>():
+        state = const TripIdle();
+    }
+  }
+
+  void resetToIdle() {
     state = const TripIdle();
   }
 
@@ -219,9 +248,32 @@ class TripNotifier extends Notifier<TripState> {
     final socket = ref.read(socketServiceProvider);
     socket.off('route:new_report');
     socket.off('route:report_confirmed');
+    socket.off('route:report_resolved');
 
     socket.on('route:new_report', (_) => unawaited(_reloadReports()));
     socket.on('route:report_confirmed', (_) => unawaited(_reloadReports()));
+    socket.on('route:report_resolved', (data) {
+      if (data is! Map) return;
+
+      final reportId = (data['reportId'] as num?)?.toInt();
+      if (reportId != null && state is TripActive) {
+        final active = state as TripActive;
+        state = active.copyWith(
+          reports: active.reports
+              .where((r) => r.id != reportId)
+              .toList(growable: false),
+        );
+      }
+
+      final type = data['type'] as String? ?? '';
+      if (type == 'trancon') {
+        final mins = (data['duration_minutes'] as num?)?.toInt() ?? 0;
+        final msg = mins > 0
+            ? '${AppStrings.tranconResolvedWithDuration}$mins${AppStrings.tranconResolvedMinutes}'
+            : AppStrings.tranconResolved;
+        _onReportResolved?.call(msg);
+      }
+    });
   }
 
   void _startLocationBroadcast() {

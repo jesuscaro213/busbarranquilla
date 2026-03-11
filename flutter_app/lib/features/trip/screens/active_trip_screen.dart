@@ -10,12 +10,14 @@ import '../../../core/l10n/strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_bottom_sheet.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_polyline_layer.dart';
 import '../providers/trip_notifier.dart';
 import '../providers/trip_state.dart';
 import '../widgets/report_create_sheet.dart';
 import '../widgets/route_reports_list.dart';
+import '../widgets/route_update_sheet.dart';
 import '../widgets/trip_summary_sheet.dart';
 
 class ActiveTripScreen extends ConsumerStatefulWidget {
@@ -34,6 +36,13 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     super.initState();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(tripNotifierProvider.notifier).setReportResolvedCallback((msg) {
+        if (mounted) AppSnackbar.show(context, msg, SnackbarType.info);
+      });
     });
   }
 
@@ -56,7 +65,6 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             onPressed: () {
               Navigator.of(ctx).pop();
               ref.read(tripNotifierProvider.notifier).endTrip();
-              if (mounted) context.go('/map');
             },
             child: const Text(AppStrings.tripEndButton),
           ),
@@ -84,7 +92,6 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             onPressed: () {
               Navigator.of(ctx).pop();
               ref.read(tripNotifierProvider.notifier).endTrip();
-              if (mounted) context.go('/map');
             },
             child: const Text(AppStrings.desvioGetOff),
           ),
@@ -124,6 +131,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen<TripState>(tripNotifierProvider, (previous, next) {
+      if (next is TripEnded) return; // handled below
+
       if (next is! TripActive) return;
       final prev = previous is TripActive ? previous : null;
 
@@ -136,6 +145,32 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     });
 
     final state = ref.watch(tripNotifierProvider);
+
+    if (state is TripEnded) {
+      final h = state.tripDuration.inHours.toString().padLeft(2, '0');
+      final m = (state.tripDuration.inMinutes % 60).toString().padLeft(2, '0');
+      final durationText = '$h:$m';
+
+      return Scaffold(
+        appBar: AppBar(title: const Text(AppStrings.tripSummaryTitle)),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: TripSummarySheet(
+              routeName: state.routeName,
+              durationText: durationText,
+              creditsEarned: state.totalCreditsEarned,
+              distanceMeters: state.distanceMeters,
+              completionBonusEarned: state.completionBonusEarned,
+              onClose: () {
+                ref.read(tripNotifierProvider.notifier).resetToIdle();
+                if (mounted) context.go('/map');
+              },
+            ),
+          ),
+        ),
+      );
+    }
 
     if (state is TripIdle) {
       return Scaffold(
@@ -171,12 +206,30 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           })()
         : null;
 
-    final center = active.trip.currentLatitude != null && active.trip.currentLongitude != null
-        ? LatLng(active.trip.currentLatitude!, active.trip.currentLongitude!)
-        : (active.route.geometry.isNotEmpty ? active.route.geometry.first : const LatLng(10.9685, -74.7813));
+    final userLat = active.trip.currentLatitude;
+    final userLng = active.trip.currentLongitude;
+    final center = userLat != null && userLng != null
+        ? LatLng(userLat, userLng)
+        : (active.route.geometry.isNotEmpty
+            ? active.route.geometry.first
+            : const LatLng(10.9685, -74.7813));
 
     return Scaffold(
-      appBar: AppBar(title: Text(active.route.name)),
+      appBar: AppBar(
+        title: Text(active.route.name),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.warning_amber_outlined),
+            tooltip: AppStrings.reportRouteTitle,
+            onPressed: () {
+              AppBottomSheet.show<void>(
+                context,
+                child: RouteUpdateSheet(routeId: active.route.id),
+              );
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(12),
@@ -230,6 +283,24 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                           ),
                         ],
                       ),
+                    if (userLat != null && userLng != null)
+                      MarkerLayer(
+                        markers: <Marker>[
+                          Marker(
+                            point: LatLng(userLat, userLng),
+                            width: 36,
+                            height: 36,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: const Icon(Icons.directions_bus, color: Colors.white, size: 20),
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -237,34 +308,13 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               Text(AppStrings.tripReportsTitle, style: Theme.of(context).textTheme.titleMedium),
               RouteReportsList(
                 reports: active.reports,
-                onConfirm: (reportId) => ref.read(tripNotifierProvider.notifier).confirmReport(reportId),
+                onConfirm: (reportId) =>
+                    ref.read(tripNotifierProvider.notifier).confirmReport(reportId),
               ),
               const SizedBox(height: 12),
               AppButton.destructive(
                 label: AppStrings.tripEndButton,
-                onPressed: () async {
-                  final routeName = active.route.name;
-                  final credits = active.trip.creditsEarned;
-                  final duration = _durationText(_duration);
-
-                  await ref.read(tripNotifierProvider.notifier).endTrip();
-
-                  if (!context.mounted) return;
-                  await AppBottomSheet.show<void>(
-                    context,
-                    title: AppStrings.tripSummaryTitle,
-                    child: TripSummarySheet(
-                      routeName: routeName,
-                      durationText: duration,
-                      creditsEarned: credits,
-                      onClose: () => context.pop(),
-                    ),
-                  );
-
-                  if (context.mounted) {
-                    context.go('/map');
-                  }
-                },
+                onPressed: () => ref.read(tripNotifierProvider.notifier).endTrip(),
               ),
             ],
           ),

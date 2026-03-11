@@ -21,6 +21,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _referralController = TextEditingController();
 
   String? _nameError;
   String? _emailError;
@@ -32,6 +33,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
+    _referralController.dispose();
     super.dispose();
   }
 
@@ -78,6 +80,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           email: _emailController.text.trim(),
           password: _passwordController.text,
           phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+          referredByCode: _referralController.text.trim().isEmpty
+              ? null
+              : _referralController.text.trim(),
         );
   }
 
@@ -142,6 +147,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     setState(() => _passwordError = null);
                   }
                 },
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                label: AppStrings.referralCodeLabel,
+                controller: _referralController,
               ),
               const SizedBox(height: 16),
               AppButton.primary(

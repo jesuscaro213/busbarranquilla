@@ -9,9 +9,11 @@ import '../../../core/domain/models/stop.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
+import '../../../core/socket/socket_service.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/loading_indicator.dart';
+import '../../../shared/widgets/route_activity_badge.dart';
 import '../../../shared/widgets/route_code_badge.dart';
 import '../providers/trip_notifier.dart';
 import '../providers/trip_state.dart';
@@ -44,6 +46,29 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
   void initState() {
     super.initState();
     Future<void>(() => _load());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(socketServiceProvider).joinRoute(widget.routeId);
+      ref.read(socketServiceProvider).on('route:report_resolved', _onRouteReportResolved);
+    });
+  }
+
+  @override
+  void dispose() {
+    ref.read(socketServiceProvider).leaveRoute(widget.routeId);
+    ref.read(socketServiceProvider).off('route:report_resolved');
+    super.dispose();
+  }
+
+  void _onRouteReportResolved(dynamic data) {
+    if (data is! Map || !mounted) return;
+    final type = data['type'] as String? ?? '';
+    if (type != 'trancon') return;
+    final mins = (data['duration_minutes'] as num?)?.toInt() ?? 0;
+    final msg = mins > 0
+        ? '${AppStrings.tranconResolvedWithDuration}$mins${AppStrings.tranconResolvedMinutes}'
+        : AppStrings.tranconResolvedWaiting;
+    AppSnackbar.show(context, msg, SnackbarType.info);
   }
 
   Future<void> _load() async {
@@ -174,6 +199,8 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              RouteActivityBadge(routeId: widget.routeId),
               const SizedBox(height: 20),
               const Divider(),
               const SizedBox(height: 12),

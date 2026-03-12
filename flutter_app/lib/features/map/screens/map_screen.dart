@@ -65,6 +65,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final isOnTrip = tripState is TripActive;
     final center = ready.userPosition ?? const LatLng(10.9685, -74.7813);
 
+    // When on a trip, use the socket-updated position from the buses list
+    // (ready.userPosition is only set at init and goes stale).
+    // Also filter own trip from BusMarkerLayer to avoid duplicate icon.
+    int? ownTripId;
+    LatLng? liveUserPosition;
+    if (tripState is TripActive) {
+      ownTripId = tripState.trip.id;
+      final ownBus = ready.buses.where((b) => b.id == ownTripId).firstOrNull;
+      if (ownBus?.currentLatitude != null && ownBus?.currentLongitude != null) {
+        liveUserPosition = LatLng(ownBus!.currentLatitude!, ownBus.currentLongitude!);
+      }
+    }
+    final userMarkerPosition = liveUserPosition ?? ready.userPosition;
+    final otherBuses = ownTripId != null
+        ? ready.buses.where((b) => b.id != ownTripId).toList(growable: false)
+        : ready.buses;
+
     return Scaffold(
       body: Stack(
         children: <Widget>[
@@ -87,11 +104,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 activeTripRouteId: ready.activeTripRouteId,
                 onConfirm: (reportId) => ref.read(mapNotifierProvider.notifier).confirmReport(reportId),
               ),
-              BusMarkerLayer(buses: ready.buses),
+              BusMarkerLayer(buses: otherBuses),
               if (selectedRoute != null)
                 ActiveRouteBusLayer(routeId: selectedRoute.id),
-              if (ready.userPosition != null)
-                UserMarkerLayer(position: ready.userPosition!, isOnTrip: isOnTrip),
+              if (userMarkerPosition != null)
+                UserMarkerLayer(position: userMarkerPosition, isOnTrip: isOnTrip),
               Consumer(
                 builder: (context, ref, _) {
                   final activePositions = ref.watch(mapActivePositionsProvider);
@@ -127,11 +144,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.go('/trip/boarding'),
-        label: const Text(AppStrings.boardedButton),
-        icon: const Icon(Icons.directions_bus),
-      ),
+      floatingActionButton: isOnTrip
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => context.go('/trip/boarding'),
+              label: const Text(AppStrings.boardedButton),
+              icon: const Icon(Icons.directions_bus),
+            ),
     );
   }
 }

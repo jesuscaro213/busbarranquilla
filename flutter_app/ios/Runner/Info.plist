@@ -66,7 +66,12 @@
 			<string>UIInterfaceOrientationLandscapeLeft</string>
 			<string>UIInterfaceOrientationLandscapeRight</string>
 		</array>
-		<key>NSLocationWhenInUseUsageDescription</key>
+		<!-- Background location — keeps GPS running when app is backgrounded during a trip -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
 		<string>MiBus necesita tu ubicación para mostrarte rutas cercanas y rastrear tu viaje en tiempo real.</string>
 		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 		<string>MiBus necesita tu ubicación en segundo plano para continuar rastreando tu viaje cuando cierras la app.</string>

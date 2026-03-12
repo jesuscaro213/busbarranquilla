@@ -1,21 +1,14 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class LocationService {
-  static Stream<Position> get positionStream => Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 10,
-    ),
-  );
-
+  /// Basic "while in use" permission — used by map, planner, boarding.
   static Future<bool> requestLocationPermission() async {
     final permissionStatus = await Permission.locationWhenInUse.request();
-    if (!permissionStatus.isGranted) {
-      return false;
-    }
+    if (!permissionStatus.isGranted) return false;
 
     final geolocatorPermission = await Geolocator.checkPermission();
     if (geolocatorPermission == LocationPermission.denied ||
@@ -28,16 +21,78 @@ class LocationService {
     return true;
   }
 
-  static Future<Position?> getCurrentPosition() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return null;
+  /// Requests "Always allow" permission for background location during trips.
+  /// On Android 10+: first grants "While in use", then prompts user to go to
+  /// Settings and select "Allow all the time".
+  /// Returns true if always permission is granted (or at least whileInUse).
+  static Future<bool> requestBackgroundPermission() async {
+    // Step 1: ensure "while in use" is granted first.
+    final whenInUse = await Permission.locationWhenInUse.request();
+    if (!whenInUse.isGranted) return false;
+
+    // Step 2: request "always" — on Android 10+ this opens the Settings page
+    // with the "Allow all the time" option highlighted.
+    final always = await Permission.locationAlways.request();
+    if (always.isGranted) return true;
+
+    // Fall back to "while in use" — the trip still works while the app is open.
+    return whenInUse.isGranted;
+  }
+
+  /// Background-capable position stream for active trips.
+  ///
+  /// Android: starts a persistent foreground service notification so the OS
+  /// never kills the location process when the app is backgrounded.
+  ///
+  /// iOS: enables background location updates so GPS continues when the screen
+  /// is locked or the user switches apps.
+  static Stream<Position> get backgroundPositionStream {
+    if (Platform.isAndroid) {
+      return Geolocator.getPositionStream(
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10,
+          intervalDuration: const Duration(seconds: 20),
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationTitle: 'MiBus — Viaje activo',
+            notificationText: 'Transmitiendo tu ubicación en tiempo real 🚌',
+            enableWakeLock: true,
+            notificationIcon: AndroidResource(
+              name: 'ic_launcher',
+              defType: 'mipmap',
+            ),
+          ),
+        ),
+      );
     }
 
-    final hasPermission = await requestLocationPermission();
-    if (!hasPermission) {
-      return null;
+    if (Platform.isIOS) {
+      return Geolocator.getPositionStream(
+        locationSettings: AppleSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10,
+          allowBackgroundLocationUpdates: true,
+          pauseLocationUpdatesAutomatically: false,
+          activityType: ActivityType.automotiveNavigation,
+        ),
+      );
     }
+
+    // Fallback for other platforms.
+    return Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    );
+  }
+
+  static Future<Position?> getCurrentPosition() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return null;
+
+    final hasPermission = await requestLocationPermission();
+    if (!hasPermission) return null;
 
     return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),

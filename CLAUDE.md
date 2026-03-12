@@ -958,6 +958,9 @@ User votes that the bus route has changed or is stuck. ≥3 `ruta_real` votes tr
 - Premium card with Wompi checkout
 - Favorites system
 - Route activity badges
+- **Background location transmission** — GPS stream with Android ForegroundService + iOS background updates; "Allow all the time" permission dialog on trip start
+- **Active trip screen redesigned** — full-screen map (zoom 17, CartoCDN Voyager tiles with POIs), GPS auto-follow, overlaid controls
+- **Navigation bar** — replaced with Material 3 `NavigationBar` (pill indicator for active tab); blocked during active trip (shows "Viaje activo" bar instead)
 
 **Pending (Flutter):**
 - Firebase push notifications (flutter_local_notifications already installed)

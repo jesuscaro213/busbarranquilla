@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/data/repositories/credits_repository.dart';
@@ -27,7 +28,8 @@ import '../monitors/inactivity_monitor.dart';
 import 'trip_state.dart';
 
 class TripNotifier extends Notifier<TripState> {
-  Timer? _locationTimer;
+  StreamSubscription<Position>? _locationSubscription;
+  DateTime _lastBroadcast = DateTime(0);
   Timer? _gpsCheckTimer;
   Timer? _occupancyPollTimer;
   DateTime _lastGpsAt = DateTime.now();
@@ -129,6 +131,10 @@ class TripNotifier extends Notifier<TripState> {
 
   Future<void> startTrip(int routeId, {int? destinationStopId}) async {
     state = const TripLoading();
+
+    // Request "Always allow" so the app can transmit in background.
+    // This shows the system dialog with the "Allow all the time" option.
+    await LocationService.requestBackgroundPermission();
 
     final pos = await LocationService.getCurrentPosition();
     if (pos == null) {
@@ -411,24 +417,34 @@ class TripNotifier extends Notifier<TripState> {
   }
 
   void _startLocationBroadcast() {
-    _locationTimer?.cancel();
-    _locationTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+    _locationSubscription?.cancel();
+    _lastBroadcast = DateTime(0);
+
+    // Use backgroundPositionStream: on Android this starts a foreground service
+    // notification so the OS never kills location when the app is backgrounded.
+    // On iOS this enables background location updates.
+    _locationSubscription =
+        LocationService.backgroundPositionStream.listen((pos) async {
       if (state is! TripActive) return;
 
-      final active = state as TripActive;
-      final pos = await LocationService.getCurrentPosition();
-      if (pos == null) return;
-
       _lastGpsAt = DateTime.now();
+
+      // Throttle backend updates to ~30s — the stream fires on every GPS fix
+      // (distanceFilter: 10m), but we don't need to hit the server that often.
+      final now = DateTime.now();
+      if (now.difference(_lastBroadcast).inSeconds < 28) return;
+      _lastBroadcast = now;
+
+      final active = state as TripActive;
 
       final updateResult = await ref.read(tripsRepositoryProvider).updateLocation(<String, dynamic>{
         'latitude': pos.latitude,
         'longitude': pos.longitude,
       });
 
-      if (updateResult is Success<int>) {
+      if (updateResult is Success<int> && state is TripActive) {
         ref.read(socketServiceProvider).sendLocation(pos.latitude, pos.longitude);
-        state = active.copyWith(
+        state = (state as TripActive).copyWith(
           trip: active.trip.copyWith(
             currentLatitude: pos.latitude,
             currentLongitude: pos.longitude,
@@ -437,6 +453,7 @@ class TripNotifier extends Notifier<TripState> {
         );
       }
     });
+
     _startGpsCheck();
   }
 
@@ -568,8 +585,8 @@ class TripNotifier extends Notifier<TripState> {
   }
 
   void _disposeMonitorsAndTimers() {
-    _locationTimer?.cancel();
-    _locationTimer = null;
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
     _gpsCheckTimer?.cancel();
     _gpsCheckTimer = null;
     _occupancyPollTimer?.cancel();

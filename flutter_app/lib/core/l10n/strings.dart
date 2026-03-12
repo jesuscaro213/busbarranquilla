@@ -24,6 +24,8 @@ abstract final class AppStrings {
   static const passengersLabel = 'pasajero(s)';
   static const nowAgo = 'Hace 0 min';
   static const osmTileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+  // Voyager: colorful, shows street names, POIs, parks, buildings — for trip navigation
+  static const tripTileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
   static const osmTileSubdomains = <String>['a', 'b', 'c', 'd'];
   static const osmUserAgent = 'co.mibus.app';
   static const locationRequired = 'Activa tu ubicación para usar el mapa.';
@@ -232,6 +234,9 @@ abstract final class AppStrings {
       'Te avisaremos cuando estés cerca de tu parada. Cuesta 5 créditos por viaje.';
   static const String dropoffPromptDecline = 'No, gracias';
   static const String dropoffPromptAccept = 'Activar (5 créditos)';
+
+  // Active trip bottom bar
+  static const tripActiveBar = 'Viaje activo';
 
   // Onboarding
   static const onboardingSkip = 'Omitir';

@@ -311,6 +311,73 @@ final routeActivityProvider =
 });
 ```
 
+### Flutter — Ubicación en background (transmisión siempre activa)
+
+El viaje transmite GPS aunque la app esté minimizada, pantalla bloqueada o en segundo plano.
+
+**Permiso:** Al iniciar viaje se llama `LocationService.requestBackgroundPermission()` — pide `locationWhenInUse` primero, luego `locationAlways`. En Android 10+ abre la página de ajustes con **"Permitir todo el tiempo"** disponible. En iOS muestra el diálogo con "Siempre".
+
+**Stream con Foreground Service (Android):** `LocationService.backgroundPositionStream` usa `AndroidSettings` con `ForegroundNotificationConfig` — esto arranca un servicio persistente en la barra de notificaciones ("MiBus — Viaje activo 🚌") que impide que Android mate el proceso.
+
+**Stream con background updates (iOS):** Usa `AppleSettings(allowBackgroundLocationUpdates: true, pauseLocationUpdatesAutomatically: false)`.
+
+**`trip_notifier.dart`:** `_startLocationBroadcast()` usa `StreamSubscription<Position>` al `backgroundPositionStream` en lugar de `Timer.periodic` + `getCurrentPosition()`. El stream funciona en background; las actualizaciones al backend se throttlean a ~30s.
+
+**Permisos Android (`AndroidManifest.xml`):**
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+<service android:name="com.baseflow.geolocator.GeolocatorService"
+         android:foregroundServiceType="location" android:exported="false"/>
+```
+
+**iOS (`Info.plist`):**
+```xml
+<key>UIBackgroundModes</key><array><string>location</string></array>
+```
+
+### Flutter — Tiles de mapa por contexto
+- `AppStrings.osmTileUrl` — CartoCDN `light_all` (gris, minimalista) → usado en MapScreen y PlannerScreen
+- `AppStrings.tripTileUrl` — CartoCDN `rastertiles/voyager` (colorido, muestra nombres de calles, POIs, parques, edificios) → usado SOLO en ActiveTripScreen para navegación
+
+### Flutter — ActiveTripScreen: layout full-screen
+El mapa ocupa toda la pantalla (`Stack` sin `AppBar`). Controles como overlays:
+- **Top card** (fondo `primaryDark`): nombre ruta + duración + créditos + botón reporte
+- **Banners flotantes**: GPS lost (naranja), alerta bajada (rojo/amarillo) — se apilan bajo el top card
+- **Botón re-centrar** (bottom-right): mueve mapa al GPS con zoom 17
+- **Panel inferior**: reportes plegables (tap para expandir) + botones "Reportar" | "Me bajé"
+- `MapController` sigue automáticamente la posición GPS en cada update (`_followUser`)
+- Zoom inicial: **17** (nivel de calle, muestra el entorno inmediato)
+- Bus icon: 44px con sombra azul pulsante, borde blanco
+
+### Flutter — Durante viaje activo: solo un icono de bus (el del usuario)
+
+La lista `buses` del socket incluye el propio viaje del usuario. Para evitar dos iconos:
+1. `BusMarkerLayer` recibe `otherBuses` (filtrando el `trip.id` propio)
+2. `UserMarkerLayer` usa la posición del bus propio desde la lista (actualizada por socket), NO `ready.userPosition` (que es la posición inicial del mapa — se vuelve obsoleta)
+
+```dart
+// map_screen.dart
+int? ownTripId;
+LatLng? liveUserPosition;
+if (tripState is TripActive) {
+  ownTripId = tripState.trip.id;
+  final ownBus = ready.buses.where((b) => b.id == ownTripId).firstOrNull;
+  if (ownBus?.currentLatitude != null) {
+    liveUserPosition = LatLng(ownBus!.currentLatitude!, ownBus.currentLongitude!);
+  }
+}
+final otherBuses = ownTripId != null
+    ? ready.buses.where((b) => b.id != ownTripId).toList()
+    : ready.buses;
+```
+
+### Flutter — Durante viaje activo: bloquear navegación a otros tabs
+
+`MainShell` muestra `_TripActiveBar` (barra azul "Viaje activo") en lugar del `BottomNavigationBar` cuando `isOnTrip = true`. Esto impide navegar a mapa, rutas o perfil. El FAB "Me subí" en `MapScreen` también se oculta con `isOnTrip ? null : FloatingActionButton(...)`.
+
+`MainShell` usa `ref.listen<TripState>` para auto-navegar a `/trip` si el viaje inicia desde otro tab (incluyendo recuperación de viaje al reiniciar la app).
+
 ### Flutter — MapPickScreen: siempre pasar coordenadas actuales:
 ```dart
 // Al abrir map-pick, pasar las coords actuales para que abra en el punto correcto
@@ -405,4 +472,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-11*
+*Última actualización: 2026-03-12*

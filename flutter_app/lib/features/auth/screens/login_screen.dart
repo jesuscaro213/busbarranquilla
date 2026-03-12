@@ -111,7 +111,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    const Text('🚌', style: TextStyle(fontSize: 64)),
+                    Image.asset('assets/splash/bus.png', width: 90, height: 90),
                     const SizedBox(height: 14),
                     const Text(
                       AppStrings.appName,

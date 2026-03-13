@@ -70,7 +70,11 @@ class AuthNotifier extends Notifier<AuthState> {
     state = const AuthLoading();
 
     try {
-      final googleSignIn = GoogleSignIn();
+      // serverClientId (web client, type 3) is required on Android to receive
+      // an idToken from Google. Without it, auth.idToken is always null.
+      final googleSignIn = GoogleSignIn(
+        serverClientId: '681993535892-0d8sri8quc9kuvbs03krkl2ftfq8s6k2.apps.googleusercontent.com',
+      );
       final account = await googleSignIn.signIn();
       if (account == null) {
         state = const Unauthenticated();

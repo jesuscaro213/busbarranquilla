@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -76,6 +77,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _submit() async {
     if (!_validate()) return;
 
+    TextInput.finishAutofillContext();
     await ref.read(authNotifierProvider.notifier).login(
           _emailController.text.trim(),
           _passwordController.text,
@@ -130,7 +132,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 top: false,
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-                  child: Column(
+                  child: AutofillGroup(
+                    child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       Text(
@@ -144,6 +147,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         label: AppStrings.emailLabel,
                         controller: _emailController,
                         errorText: _emailError,
+                        autofillHints: const [AutofillHints.email],
+                        textInputAction: TextInputAction.next,
                         onChanged: (_) {
                           if (_emailError != null) {
                             setState(() => _emailError = null);
@@ -156,6 +161,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         controller: _passwordController,
                         obscureText: true,
                         errorText: _passwordError,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
+                        onEditingComplete: () {
+                          TextInput.finishAutofillContext();
+                          _submit();
+                        },
                         onChanged: (_) {
                           if (_passwordError != null) {
                             setState(() => _passwordError = null);
@@ -191,6 +202,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ],
                       ),
                     ],
+                  ),
                   ),
                 ),
               ),

@@ -8,6 +8,9 @@ class AppTextField extends StatefulWidget {
   final bool obscureText;
   final TextEditingController? controller;
   final ValueChanged<String>? onChanged;
+  final Iterable<String>? autofillHints;
+  final TextInputAction? textInputAction;
+  final VoidCallback? onEditingComplete;
 
   const AppTextField({
     required this.label,
@@ -15,6 +18,9 @@ class AppTextField extends StatefulWidget {
     this.obscureText = false,
     this.controller,
     this.onChanged,
+    this.autofillHints,
+    this.textInputAction,
+    this.onEditingComplete,
     super.key,
   });
 
@@ -45,6 +51,9 @@ class _AppTextFieldState extends State<AppTextField> {
       controller: widget.controller,
       onChanged: widget.onChanged,
       obscureText: _obscure,
+      autofillHints: widget.autofillHints,
+      textInputAction: widget.textInputAction,
+      onEditingComplete: widget.onEditingComplete,
       decoration: InputDecoration(
         labelText: widget.label,
         errorText: widget.errorText,

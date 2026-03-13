@@ -259,6 +259,9 @@ abstract final class AppStrings {
   static const String dropoffPromptDecline = 'No, gracias';
   static const String dropoffPromptAccept = 'Activar (5 créditos)';
   static const String dropoffDestinationSet = '¡Listo! Te avisaremos al acercarte a ese punto.';
+  static const String tripChangeDestination = 'Cambiar destino';
+  static const String dropoffConfirmButton = 'Confirmar parada';
+  static const String dropoffCancelButton = 'Elegir otro punto';
 
   // Active trip bottom bar
   static const tripActiveBar = 'Viaje activo';

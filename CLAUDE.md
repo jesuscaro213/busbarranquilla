@@ -2,17 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## AI_CONTEXT.md — Regla obligatoria
+## ⚠️ REGLA #1 — OBLIGATORIO SIN EXCEPCIÓN
 
-**`AI_CONTEXT.md` existe en la raíz del proyecto y debe mantenerse actualizado.**
-Después de cada cambio relevante al proyecto (nueva feature, fix, nuevo endpoint, cambio de arquitectura, nuevo patrón de código, cambio en DB schema, cambio en assets, etc.), actualiza las secciones correspondientes de `AI_CONTEXT.md`:
+**Al terminar CUALQUIER tarea** (fix, feature, refactor, cambio de assets, nuevo patrón, etc.) **DEBES actualizar `AI_CONTEXT.md` Y `CLAUDE.md` antes de responder "listo".**
+
+No es opcional. No importa si el cambio parece pequeño. Si tocaste código, actualizas los docs.
+
+### Qué actualizar en `AI_CONTEXT.md`:
 - Nuevos endpoints → sección "API endpoints principales"
 - Cambios en DB → sección "Esquema de base de datos"
-- Nuevos patrones o reglas → sección "Patrones de código importantes"
-- Nuevas features completadas → sección "Estado del proyecto"
-- Cambios en rutas Flutter → sección "Rutas de navegación Flutter"
+- Nuevos patrones o bugs corregidos → sección "Patrones de código importantes"
+- Features completadas → sección "Estado del proyecto"
 - Cambios en flujos clave → sección "Flujos clave"
-- Actualizar siempre la fecha de "Última actualización" al final del archivo.
+- Siempre actualizar la fecha de "Última actualización" al final del archivo
+
+### Qué actualizar en `CLAUDE.md`:
+- Nuevas fases completadas → sección "Development Phases"
+- Cambios en arquitectura o patrones → secciones correspondientes
+
+### Cuándo actualizar la memoria del proyecto (`~/.claude/.../memory/`):
+- Bugs corregidos no obvios → memoria `feedback`
+- Patrones importantes descubiertos → memoria `feedback` o `project`
 
 ## What is this?
 

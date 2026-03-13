@@ -425,13 +425,26 @@ solo si el cache es null.
 1. `startTrip()` finaliza → `_startMonitors()` fija `dropoffPrompt: true` (con o sin destino)
 2. `ActiveTripScreen.initState` detecta el prompt → muestra `AlertDialog`
 3. Usuario acepta:
-   - Con destino pre-seleccionado → `activateDropoffAlerts()` cobra 5 cr, arranca `DropoffMonitor`
-   - Sin destino → navega a `/trip/stop-select?routeId=X&setDestination=true` → usuario elige parada
-     → `setDestinationStop(stop)` cobra 5 cr, arranca `DropoffMonitor`
+   - Con destino pre-seleccionado (`destinationStopId != null`) → `activateDropoffAlerts()` cobra 5 cr, arranca `DropoffMonitor`
+   - Sin destino → `_pickDestinationOnMap()` → abre `MapPickScreen` centrado en GPS actual → usuario elige punto en mapa → bottom sheet de confirmación → `setDestinationByLatLng()` cobra 5 cr, crea `Stop` sintético (`id: -1`), arranca `DropoffMonitor`
 4. `DropoffMonitor` verifica posición cada 15s:
    - ≤400 m → banner amarillo "Prepárate para bajar"
    - ≤200 m → banner rojo "¡Bájate ya!" + 3 vibraciones fuertes
    - Pasó la parada → banner "Perdiste la parada"
+
+**Cambiar destino durante viaje activo (botón 🚩 en `ActiveTripScreen`):**
+`_changeDestination()` abre `MapPickScreen` centrado en el destino EXISTENTE, no en el GPS:
+| Prioridad | Fuente | Cuándo aplica |
+|---|---|---|
+| 1 | `notifier.dropoffMonitorDestination` | Monitor activo (planner premium + mapa pick) |
+| 2 | Stop por `destinationStopId` en la lista de paradas | Planner free, monitor aún no arrancado |
+| 3 | GPS actual | Sin destino alguno |
+
+`TripNotifier.dropoffMonitorDestination` → getter público que expone `_dropoffMonitor?.destination` como `LatLng?`
+`TripNotifier.hasDropoffMonitor` → bool; si `true` → `updateDestinationByLatLng()` (gratis); si `false` → `setDestinationByLatLng()` (cobra 5 cr)
+
+**IMPORTANTE — `active_trips` NO tiene columnas `destination_lat/destination_lng`:**
+`ActiveTrip.destinationLat/Lng` en el modelo Dart nunca se populan desde el backend. La fuente de verdad del destino durante un viaje es `_dropoffMonitor.destination` (en memoria) o `trip.destinationStopId` (persistido en DB).
 
 ### Flutter — Durante viaje activo: solo un icono de bus (el del usuario)
 
@@ -583,6 +596,10 @@ Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpa
 - **Paleta "Profesional Atardecer"**: primary `#1A5080`, primaryDark `#0B2F52`, accent `#E7B342`, error/critical `#CD1C2B`, background `#F5F7FA`; navigation bar azul oscuro con iconos dorados
 - **Cards con borde izquierdo de color**: "Cerca de ti", favoritos y "Buses en tu zona" → fondo blanco + sombra + borde izquierdo 4px en color de `AppColors.forRouteCode(route.code)`
 - **Alerta de bajada — selección en mapa**: cuando el usuario no tiene destino, se abre `MapPickScreen` (crosshair) en vez de lista de paradas; `setDestinationByLatLng()` crea `Stop` sintético (`id: -1`) para el monitor; premium/admin no pagan créditos
+- **Cambiar destino durante viaje activo (🚩)**: `_changeDestination()` centra el mapa en el destino ya seleccionado (no en GPS); prioridad: monitor > stop por ID > GPS. `TripNotifier.dropoffMonitorDestination` getter expone destino del monitor activo
+- **MapScreen durante viaje**: muestra polilínea del viaje activo + marcador de destino (bandera verde) cuando `TripActive.stops` tiene la parada destino
+- **MapPickScreen durante viaje**: muestra polilínea de la ruta activa como referencia visual
+- **Ruta del mapa (MapScreen)**: la feed route solo se muestra cuando NO hay viaje activo (`!isOnTrip`)
 
 ### Pendiente 🚧
 - Firebase push notifications (flutter_local_notifications ya instalado)
@@ -645,4 +662,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-13 (v7)*
+*Última actualización: 2026-03-13 (v8)*

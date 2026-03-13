@@ -141,6 +141,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     final tripState = ref.read(tripNotifierProvider);
     double? initLat, initLng;
     if (tripState is TripActive) {
+      // No destination set yet — center on current GPS.
       initLat = tripState.trip.currentLatitude;
       initLng = tripState.trip.currentLongitude;
     }
@@ -150,10 +151,106 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     );
 
     if (!mounted || result == null) return;
+
+    final confirmed = await _showDestinationConfirm(result.displayName);
+    if (!mounted || confirmed != true) return;
+
     await notifier.setDestinationByLatLng(result.lat, result.lng, result.displayName);
     if (mounted) {
       AppSnackbar.show(context, AppStrings.dropoffDestinationSet, SnackbarType.success);
     }
+  }
+
+  Future<void> _changeDestination() async {
+    final notifier = ref.read(tripNotifierProvider.notifier);
+    final tripState = ref.read(tripNotifierProvider);
+    double? initLat, initLng;
+    if (tripState is TripActive) {
+      final trip = tripState.trip;
+      // Priority 1: active monitor destination — covers both planner trips
+      // (real stop) and map-pick trips (synthetic stop). Most accurate.
+      final monitorDest = notifier.dropoffMonitorDestination;
+      if (monitorDest != null) {
+        initLat = monitorDest.latitude;
+        initLng = monitorDest.longitude;
+      } else {
+        // Priority 2: destination stop from the stops list (free user on planner
+        // trip whose monitor hasn't started yet because they haven't paid).
+        final destStop = trip.destinationStopId != null
+            ? tripState.stops
+                .where((s) => s.id == trip.destinationStopId)
+                .firstOrNull
+            : null;
+        if (destStop != null) {
+          initLat = destStop.latitude;
+          initLng = destStop.longitude;
+        } else {
+          // Priority 3: current GPS fallback.
+          initLat = trip.currentLatitude;
+          initLng = trip.currentLongitude;
+        }
+      }
+    }
+
+    final result = await context.push<NominatimResult>(
+      '/map-pick${initLat != null ? '?lat=$initLat&lng=$initLng' : ''}',
+    );
+
+    if (!mounted || result == null) return;
+
+    final confirmed = await _showDestinationConfirm(result.displayName);
+    if (!mounted || confirmed != true) return;
+
+    if (notifier.hasDropoffMonitor) {
+      notifier.updateDestinationByLatLng(result.lat, result.lng, result.displayName);
+      if (mounted) AppSnackbar.show(context, AppStrings.dropoffDestinationSet, SnackbarType.success);
+    } else {
+      await notifier.setDestinationByLatLng(result.lat, result.lng, result.displayName);
+      if (mounted) AppSnackbar.show(context, AppStrings.dropoffDestinationSet, SnackbarType.success);
+    }
+  }
+
+  Future<bool?> _showDestinationConfirm(String locationName) {
+    return showModalBottomSheet<bool>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Icon(Icons.flag, color: AppColors.accent, size: 32),
+            const SizedBox(height: 12),
+            Text(
+              AppStrings.tripChangeDestination,
+              style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              locationName,
+              style: Theme.of(ctx).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 24),
+            AppButton.primary(
+              label: AppStrings.dropoffConfirmButton,
+              onPressed: () => Navigator.of(ctx).pop(true),
+            ),
+            const SizedBox(height: 4),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text(AppStrings.dropoffCancelButton, style: TextStyle(color: AppColors.textSecondary)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showSuspiciousDialog() {
@@ -572,15 +669,28 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               child: _OccupancyBadge(state: active.occupancyState!),
             ),
 
-          // ── Re-center button ──────────────────────────────────────────────
+          // ── Re-center + change destination buttons ───────────────────────
           Positioned(
             right: 12,
             bottom: 160,
-            child: FloatingActionButton.small(
-              heroTag: 'recenter',
-              backgroundColor: Colors.white,
-              onPressed: () => _mapController.move(center, 17),
-              child: const Icon(Icons.my_location, color: AppColors.primary),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                FloatingActionButton.small(
+                  heroTag: 'change_dest',
+                  backgroundColor: Colors.white,
+                  tooltip: AppStrings.tripChangeDestination,
+                  onPressed: () => _changeDestination(),
+                  child: const Icon(Icons.flag_outlined, color: AppColors.accent),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'recenter',
+                  backgroundColor: Colors.white,
+                  onPressed: () => _mapController.move(center, 17),
+                  child: const Icon(Icons.my_location, color: AppColors.primary),
+                ),
+              ],
             ),
           ),
 

@@ -98,6 +98,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final selectedRoute = ref.watch(selectedFeedRouteProvider);
     final tripState = ref.watch(tripNotifierProvider);
     final isOnTrip = tripState is TripActive;
+    final activeTrip = isOnTrip ? tripState : null;
+    final activeTripGeometry = activeTrip?.route.geometry ?? const <LatLng>[];
+    final destinationStop = activeTrip != null && activeTrip.trip.destinationStopId != null
+        ? activeTrip.stops.where((s) => s.id == activeTrip.trip.destinationStopId).firstOrNull
+        : null;
 
     // Live GPS position takes priority; fallback to map state for initial render.
     final center = _livePosition ?? ready.userPosition ?? const LatLng(10.9685, -74.7813);
@@ -143,8 +148,28 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 keepBuffer: 3,
                 panBuffer: 1,
               ),
-              if (selectedRoute != null && selectedRoute.geometry.isNotEmpty)
+              // Feed route (when no active trip)
+              if (!isOnTrip && selectedRoute != null && selectedRoute.geometry.isNotEmpty)
                 RoutePolylineLayer(points: selectedRoute.geometry),
+              // Active trip route — always visible during a trip
+              if (activeTripGeometry.isNotEmpty)
+                RoutePolylineLayer(
+                  points: activeTripGeometry,
+                  color: AppColors.primary.withValues(alpha: 0.8),
+                  strokeWidth: 5,
+                ),
+              // Destination stop marker
+              if (destinationStop != null)
+                MarkerLayer(
+                  markers: <Marker>[
+                    Marker(
+                      point: LatLng(destinationStop.latitude, destinationStop.longitude),
+                      width: 36,
+                      height: 36,
+                      child: const Icon(Icons.flag, color: AppColors.success, size: 32),
+                    ),
+                  ],
+                ),
               const PlanMarkersLayer(),
               ReportMarkerLayer(
                 reports: ready.reports,

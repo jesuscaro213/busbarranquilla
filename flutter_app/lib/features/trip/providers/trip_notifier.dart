@@ -34,6 +34,16 @@ class TripNotifier extends Notifier<TripState> {
   Timer? _occupancyPollTimer;
   DateTime _lastGpsAt = DateTime.now();
   DropoffMonitor? _dropoffMonitor;
+  bool get hasDropoffMonitor => _dropoffMonitor != null;
+
+  /// Current dropoff destination coordinates, if a monitor is running.
+  /// Used to center the map-pick screen on the already-selected destination.
+  LatLng? get dropoffMonitorDestination {
+    final dest = _dropoffMonitor?.destination;
+    if (dest == null) return null;
+    return LatLng(dest.latitude, dest.longitude);
+  }
+
   InactivityMonitor? _inactivityMonitor;
   AutoResolveMonitor? _autoResolveMonitor;
   DesvioMonitor? _desvioMonitor;
@@ -427,6 +437,21 @@ class TripNotifier extends Notifier<TripState> {
     );
     _startDropoffMonitor(syntheticStop, active.stops);
     state = active.copyWith(dropoffPrompt: false);
+  }
+
+  /// Updates destination during an active trip without charging credits again.
+  void updateDestinationByLatLng(double lat, double lng, String label) {
+    if (state is! TripActive) return;
+    final active = state as TripActive;
+    final syntheticStop = Stop(
+      id: -1,
+      routeId: active.route.id,
+      name: label,
+      latitude: lat,
+      longitude: lng,
+      stopOrder: 0,
+    );
+    _startDropoffMonitor(syntheticStop, active.stops);
   }
 
   /// Sets a destination on an already-active trip and starts dropoff monitoring.

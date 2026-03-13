@@ -80,6 +80,7 @@ abstract final class AppStrings {
     'bus_disponible': '🟢 Hay sillas',
     'sin_parar': '⚠️ Sin parar en parada',
     'desvio': '🔀 Desvío',
+    'ruta_real': '🗺️ Ruta diferente al mapa',
   };
 
   static const prepareToAlight = 'Prepárate para bajar';
@@ -88,11 +89,17 @@ abstract final class AppStrings {
   static const stillOnBus = '¿Sigues en el bus?';
   static const stillOnBusBody = 'Detectamos que llevas mucho tiempo sin moverte. ¿Todavía estás en el bus?';
   static const stillOnBusYes = 'Sí, sigo aquí';
-  static const desvioTitle = 'Posible desvío';
-  static const desvioBody = 'Parece que el bus se alejó de la ruta. ¿Qué quieres hacer?';
-  static const desvioReport = 'Reportar desvío';
+  static const desvioTitle = 'El bus se alejó de la ruta';
+  static const desvioBody = '¿Qué está pasando?';
+  static const desvioTemporal = 'Desvío temporal (trancón)';
+  static const desvioTemporalDesc = 'El bus tomó un atajo por tráfico. Es temporal.';
+  static const desvioRutaDiferente = 'La ruta del bus es diferente al mapa';
+  static const desvioRutaDiferenteDesc = 'El bus siempre va por aquí — el mapa está desactualizado.';
   static const desvioGetOff = 'Me bajé';
   static const desvioIgnore = 'Ignorar 5 min';
+  static const desvioRutaRealSent = 'Reporte enviado. Monitoreando re-ingreso a la ruta...';
+  static const desvioRutaRealOnRoute = 'Estás sobre la ruta registrada, el reporte no aplica';
+  static const desvioRutaRealReEntry = '✓ Segmento desactualizado registrado. ¡Gracias!';
 
   static const premiumTitle = 'MiBus Premium';
   static const premiumAlready = '✓ Ya eres Premium';
@@ -127,6 +134,16 @@ abstract final class AppStrings {
   static const tripShortDistance = 'Recorriste menos de 2 km — no se otorgó el bonus de completación';
   static const tripKmSuffix = 'km';
   static const tripMetersSuffix = 'm';
+  static const tripSummaryCompleted = '¡Viaje completado!';
+  static const tripSummaryReports = 'Reportes en el viaje';
+  static const tripSummaryNoReports = 'Sin reportes';
+  static const tripSummaryStreakLabel = 'Racha de reportes';
+  static const tripSummaryStreakDays = 'días seguidos 🔥';
+  static const tripSummaryStreakNone = 'Reporta hoy para empezar tu racha';
+  static const tripEndConfirmTitle = '¿Ya te bajaste?';
+  static const tripEndConfirmBody = 'Confirma que bajaste del bus para guardar tu viaje y créditos.';
+  static const tripEndConfirmYes = 'Sí, me bajé';
+  static const tripEndConfirmNo = 'Seguir en el bus';
 
   // Trancón resolved notifications
   static const tranconResolvedWithDuration = 'Trancón resuelto — duró ~';

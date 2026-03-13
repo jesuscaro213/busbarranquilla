@@ -606,6 +606,12 @@ Specs are numbered markdown files describing feature implementations for Codex:
 | 17 | Back button fix (context.push for profile sub-screens) |
 | 18 | Google Sign-In (google_sign_in package, POST /api/auth/google) |
 | 19 | Onboarding (3-slide PageView, shown once via SharedPreferences) |
+| 20 | Dropoff alert fixes (initState check, getLastKnownPosition, 3x heavyImpact) |
+| 21 | Trip end confirmation dialog (AlertDialog antes de Me bajé) |
+| 22 | Trip summary redesign (TripEnded: reportsCreated + streakDays, full-screen card) |
+| 23 | Desvío dialog differentiation (4 opciones: temporal vs ruta_real vs ignorar vs bajarse) |
+| 24 | Timer + credits visibility (badges con fondo en top bar) |
+| 25 | Smart ruta_real report (GPS validation + re-entry timer + backend geospatial check) |
 
 **When writing new specs for Codex:**
 - Reference existing file paths and widget/class names exactly
@@ -961,6 +967,12 @@ User votes that the bus route has changed or is stuck. ≥3 `ruta_real` votes tr
 - **Background location transmission** — GPS stream with Android ForegroundService + iOS background updates; "Allow all the time" permission dialog on trip start
 - **Active trip screen redesigned** — full-screen map (zoom 17, CartoCDN Voyager tiles with POIs), GPS auto-follow, overlaid controls
 - **Navigation bar** — replaced with Material 3 `NavigationBar` (pill indicator for active tab); blocked during active trip (shows "Viaje activo" bar instead)
+- **Dropoff alerts fixed** — prompt aparece en `initState` (no solo en `ref.listen`); `DropoffMonitor` usa `getLastKnownPosition()`; vibración 3x `heavyImpact` con 350ms delay
+- **Confirmación antes de "Me bajé"** — `AlertDialog` destructivo antes de `endTrip()`
+- **Resumen de viaje rediseñado** — pantalla completa `_TripSummaryScreen`: créditos grandes, duración, distancia, reportes creados, racha de días (cargados en paralelo con `Future.wait`)
+- **Desvío dialog diferenciado** — separa "desvío temporal (trancón)" de "ruta diferente al mapa"; cada opción con ícono, título, descripción y acción distinta
+- **Timer y créditos más visibles** — badges con fondo (`primaryDark` semitransparente / amber) en la top bar del viaje activo
+- **Reporte ruta_real inteligente** — `TripNotifier.reportRutaReal()`: GPS `getLastKnownPosition()` → backend valida contra geometría (200m umbral) → si aceptado activa `_deviationReEntryTimer` 15s → cuando GPS re-entra < 200m → `updateDeviationReEntry` + snackbar; cancelado en `_disposeMonitorsAndTimers()`
 
 **Pending (Flutter):**
 - Firebase push notifications (flutter_local_notifications already installed)

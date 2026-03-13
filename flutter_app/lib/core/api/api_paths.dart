@@ -12,6 +12,7 @@ abstract final class ApiPaths {
   static const routesPlan = '/api/routes/plan';
   static String routeById(int id) => '/api/routes/$id';
   static String routeUpdateReport(int id) => '/api/routes/$id/update-report';
+  static String routeUpdateReEntry(int id) => '/api/routes/$id/update-report/reentry';
   static String routeStops(int id) => '/api/stops/route/$id';
 
   static const reportsNearby = '/api/reports/nearby';
@@ -33,6 +34,7 @@ abstract final class ApiPaths {
   static const creditsBalance = '/api/credits/balance';
   static const creditsHistory = '/api/credits/history';
   static const creditsSpend = '/api/credits/spend';
+  static const creditsStats = '/api/credits/stats';
 
   static const paymentPlans = '/api/payments/plans';
   static const paymentCheckout = '/api/payments/checkout';

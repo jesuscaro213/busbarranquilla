@@ -190,7 +190,7 @@ credit_transactions  — user_id, amount, type, description
 active_trips   — user_id, route_id, current_lat, current_lng, destination_stop_id, is_active, total_distance_meters
 user_favorite_routes — user_id, route_id (UNIQUE)
 payments       — user_id, wompi_reference, plan, amount_cents, status(pending|approved|declined)
-route_update_reports — route_id, user_id, tipo(trancon|ruta_real) (UNIQUE por usuario+ruta)
+route_update_reports — route_id, user_id, tipo(trancon|ruta_real), reported_geometry JSONB (UNIQUE por usuario+ruta)
 ```
 
 **Campos clave:**
@@ -218,7 +218,8 @@ GET  /api/routes/nearby?lat=&lng=&radius= — rutas cercanas (km)
 GET  /api/routes/plan?originLat=&originLng=&destLat=&destLng= — planificador (auth)
 GET  /api/routes/active-feed — hasta 8 rutas con actividad en última hora (auth)
 GET  /api/routes/:id/activity — actividad última hora: count, posiciones, eventos (auth)
-POST /api/routes/:id/update-report — votar trancon|ruta_real (auth)
+POST /api/routes/:id/update-report — votar trancon|ruta_real con { lat, lng } para ruta_real (auth); valida GPS contra geometría, 400 on_route:true si < 200m
+PATCH /api/routes/:id/update-report/reentry — registrar re-ingreso a la ruta { lat, lng } (auth); actualiza reported_geometry con tramo completo [inicio, fin]
 ```
 
 ### Viajes
@@ -483,6 +484,84 @@ SnackbarType.error
 SnackbarType.info
 ```
 
+### Flutter — Diálogo de desvío (4 opciones)
+Cuando el `DesvioMonitor` detecta que el bus se alejó ≥250m de la ruta por ≥90s, muestra un `AlertDialog` con:
+1. 🟠 **Desvío temporal (trancón)** — `createReport('desvio')` — reporte normal 30 min, no alerta admin
+2. 🔴 **La ruta del bus es diferente al mapa** — `notifier.reportRutaReal()` con validación inteligente (ver abajo)
+3. **Ignorar 5 min** (outlined) — pausa el monitor
+4. **Me bajé** (outlined rojo) — finaliza el viaje con confirmación
+
+### Flutter / Backend — Reporte "Ruta diferente al mapa" inteligente ✅ IMPLEMENTADO
+
+**Flujo completo:**
+1. Usuario selecciona "🗺️ Ruta diferente al mapa" en el sheet de reportes OR en el diálogo de desvío
+2. **`TripNotifier.reportRutaReal(routeId, geometry)`** — retorna `'on_route'` | `'ok'` | `'error'`:
+   - Obtiene GPS con `Geolocator.getLastKnownPosition()` (fast), fallback a `getCurrentPosition()`
+   - Llama `POST /api/routes/:id/update-report` con `{ tipo: 'ruta_real', lat, lng }`
+3. **Backend valida** GPS contra `routes.geometry` (Haversine, umbral 200m) → 400 `{ on_route: true }` si está sobre la ruta
+4. **Resultados mostrados al usuario:**
+   - `'on_route'` → snackbar "Estás sobre la ruta registrada, el reporte no aplica"
+   - `'ok'` → snackbar "Reporte enviado. Monitoreando re-ingreso..." + activa timer
+   - `'error'` → snackbar error genérico
+5. **Si reporte aceptado** → `_deviationReEntryTimer` (Timer.periodic 15s) se activa:
+   - Cada 15s: obtiene GPS y valida contra `geometry`; **re-chequea `state is TripActive`** después del await para evitar snackbar fantasma post-trip
+   - Cuando distancia < 200m → `PATCH /api/routes/:id/update-report/reentry` (best-effort) → callback snackbar "✓ Segmento desactualizado registrado" → cancela timer
+   - Se cancela automáticamente en `_disposeMonitorsAndTimers()` al finalizar el viaje
+
+**Backend (`routeUpdateController.ts`):**
+- `reportRouteUpdate`: acepta `{ tipo, lat, lng }`, valida GPS contra `routes.geometry`, guarda `reported_geometry = [[lat, lng]]` si válido
+- `updateDeviationReEntry`: actualiza `reported_geometry → [[start_lat,start_lng],[end_lat,end_lng]]` (solo si actualmente tiene 1 punto)
+
+**Flutter — archivos modificados:**
+| Archivo | Cambio |
+|---------|--------|
+| `location_service.dart` | `static double minDistToPolyline(lat, lng, List<dynamic>)` |
+| `api_paths.dart` | `static String routeUpdateReEntry(int id)` |
+| `routes_remote_source.dart` | `reportRouteUpdate({lat?, lng?})` + `updateDeviationReEntry()` |
+| `routes_repository.dart` | Retorna `({bool onRoute, bool ok})` record; maneja 400 `on_route: true` |
+| `trip_notifier.dart` | `_deviationReEntryTimer`, `_deviationRouteId`, `_onDeviationReEntry`, `reportRutaReal()`, `setDeviationReEntryCallback()` |
+| `active_trip_screen.dart` | Llama `notifier.reportRutaReal()` en report sheet y desvío dialog; pre-captura `ScaffoldMessenger` antes del await; helper `_showRutaRealResult()` |
+| `route_update_sheet.dart` | Actualizado a nuevo tipo record `({bool ok, bool onRoute})` |
+
+**Resultado para el admin:**
+`reported_geometry` pasa de `null` → `[[startLat, startLng]]` (inicio desviación) → `[[startLat, startLng], [endLat, endLng]]` (tramo completo). El panel admin dibuja `reported_geometry` como polilínea → admin ve exactamente qué tramo está desactualizado.
+
+### Flutter — Confirmación antes de "Me bajé"
+
+`_confirmEndTrip()` en `ActiveTripScreen` muestra un `AlertDialog` antes de llamar `endTrip()`:
+- Título: "¿Ya te bajaste?"
+- Acciones: "Seguir en el bus" (dismiss) | "Sí, me bajé" (rojo destructivo → `endTrip()`)
+
+### Flutter — Resumen de viaje rediseñado (`TripEnded`)
+
+`TripEnded` tiene campos: `routeName`, `totalCreditsEarned`, `distanceMeters`, `completionBonusEarned`, `tripDuration`, `reportsCreated`, `streakDays`.
+
+`_TripSummaryScreen` (pantalla completa dentro de `ActiveTripScreen`):
+- Header oscuro (`primaryDark`): checkmark verde + "¡Viaje completado!" + nombre ruta
+- Tarjeta blanca: número grande de créditos (+N), badge "Bono completar" si aplica, fila de stats (duración + distancia), card de reportes en el viaje, card de racha de días
+- `endTrip()` corre `tripsRepository.end()` y `creditsRepository.getReportStreak()` en **paralelo** con `Future.wait`
+- `_reportsCreatedThisTrip` se incrementa en cada `createReport()` exitoso
+
+### Flutter — ScaffoldMessenger antes de await (patrón lint-safe)
+
+Cuando se usa `BuildContext` después de un `await` en un callback:
+```dart
+// ✅ Capturar ANTES del await
+final messenger = ScaffoldMessenger.of(context);
+final result = await someAsyncCall();
+if (!mounted) return;
+messenger.showSnackBar(...); // usar messenger, no context
+```
+
+### Flutter — Vibración fuerte triple
+
+Al disparar `onAlight` en `DropoffMonitor`:
+```dart
+HapticFeedback.heavyImpact();
+Future<void>.delayed(const Duration(milliseconds: 350), HapticFeedback.heavyImpact);
+Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpact);
+```
+
 ---
 
 ## Estado del proyecto
@@ -494,6 +573,10 @@ SnackbarType.info
 - Sistema anti-fraude: cooldown 5 min entre viajes, bono completar ≥2 km
 - Rate limiting: auth (20/15min), reports (15/5min), general (300/1min)
 - Cron zombie trips (>4h sin actualización → cerrar)
+- **Alerta de bajada para usuarios free**: prompt en initState (no en ref.listen), vibración 3x heavyImpact, GPS vía getLastKnownPosition (rápido)
+- **Confirmación antes de "Me bajé"**: AlertDialog destructivo
+- **Resumen de viaje rediseñado**: pantalla completa con créditos grandes, duración, distancia, reportes creados, racha de días (cargado en paralelo con endTrip)
+- **Reporte "Ruta diferente al mapa" inteligente**: validación GPS doble (cliente + backend), re-entry timer 15s, guarda tramo desactualizado en reported_geometry
 
 ### Pendiente 🚧
 - Firebase push notifications (flutter_local_notifications ya instalado)
@@ -554,4 +637,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-13 (v4)*
+*Última actualización: 2026-03-13 (v6)*

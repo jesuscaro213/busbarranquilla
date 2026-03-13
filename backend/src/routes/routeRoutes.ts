@@ -19,6 +19,7 @@ import {
 import { recommendRoutes } from '../controllers/recommendController';
 import {
   reportRouteUpdate,
+  updateDeviationReEntry,
   getRouteUpdateAlerts,
   getRouteUpdateAlertsCount,
   dismissRouteAlert,
@@ -55,6 +56,7 @@ router.patch('/:id/toggle', authMiddleware, requireRole('admin'), toggleRouteAct
 router.post('/:id/regenerate-geometry', authMiddleware, requireRole('admin'), regenerateGeometry);
 router.get('/:id/activity', authMiddleware, getRouteActivity);
 router.post('/:id/update-report', authMiddleware, reportRouteUpdate);
+router.patch('/:id/update-report/reentry', authMiddleware, updateDeviationReEntry);
 router.patch('/:id/dismiss-alert', authMiddleware, requireRole('admin'), dismissRouteAlert);
 router.patch('/:id/apply-reported-geometry', authMiddleware, requireRole('admin'), applyReportedGeometry);
 

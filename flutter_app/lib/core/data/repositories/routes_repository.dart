@@ -99,14 +99,35 @@ class RoutesRepository {
     }
   }
 
-  Future<Result<void>> reportRouteUpdate(int routeId, String tipo) async {
+  /// Returns `(onRoute: true)` when the backend rejects because user is on the route.
+  Future<({bool onRoute, bool ok})> reportRouteUpdate(
+    int routeId,
+    String tipo, {
+    double? lat,
+    double? lng,
+  }) async {
     try {
-      await _source.reportRouteUpdate(routeId, tipo);
-      return const Success<void>(null);
+      final data = await _source.reportRouteUpdate(routeId, tipo, lat: lat, lng: lng);
+      return (onRoute: false, ok: data['ok'] == true);
     } on DioException catch (e) {
-      return Failure<void>(mappedErrorFromDio(e));
+      // Backend returns 400 with on_route:true when GPS is on the registered route.
+      final body = e.response?.data;
+      if (e.response?.statusCode == 400 &&
+          body is Map &&
+          body['on_route'] == true) {
+        return (onRoute: true, ok: false);
+      }
+      return (onRoute: false, ok: false);
     } catch (_) {
-      return const Failure<void>(UnknownError());
+      return (onRoute: false, ok: false);
+    }
+  }
+
+  Future<void> updateDeviationReEntry(int routeId, double lat, double lng) async {
+    try {
+      await _source.updateDeviationReEntry(routeId, lat, lng);
+    } catch (_) {
+      // Best-effort — silent failure, the start point is already saved.
     }
   }
 }

@@ -92,6 +92,8 @@ final class TripEnded extends TripState {
   final int distanceMeters;
   final bool completionBonusEarned;
   final Duration tripDuration;
+  final int reportsCreated;
+  final int streakDays;
 
   const TripEnded({
     required this.routeName,
@@ -99,5 +101,7 @@ final class TripEnded extends TripState {
     required this.distanceMeters,
     required this.completionBonusEarned,
     required this.tripDuration,
+    this.reportsCreated = 0,
+    this.streakDays = 0,
   });
 }

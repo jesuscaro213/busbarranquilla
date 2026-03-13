@@ -59,6 +59,16 @@ class CreditsRepository {
       return const Failure<void>(UnknownError());
     }
   }
+
+  /// Returns the user's current report streak (days in a row with at least one report).
+  Future<int> getReportStreak() async {
+    try {
+      final data = await _source.getStats();
+      return intAt(data, 'report_streak');
+    } catch (_) {
+      return 0;
+    }
+  }
 }
 
 final creditsRepositoryProvider = Provider<CreditsRepository>((ref) {

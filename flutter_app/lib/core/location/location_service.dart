@@ -126,4 +126,19 @@ class LocationService {
     double lng2,
   ) =>
       distanceKm(lat1, lng1, lat2, lng2) * 1000;
+
+  /// Minimum distance in meters from [lat,lng] to any vertex of [geometry].
+  /// Uses point-to-nearest-vertex (O(n)) which is sufficient for route validation.
+  static double minDistToPolyline(
+    double lat,
+    double lng,
+    List<dynamic> geometry, // List<LatLng> accepted via duck-typing
+  ) {
+    double min = double.infinity;
+    for (final point in geometry) {
+      final d = distanceMeters(lat, lng, point.latitude as double, point.longitude as double);
+      if (d < min) min = d;
+    }
+    return min;
+  }
 }

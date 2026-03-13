@@ -28,4 +28,9 @@ class CreditsRemoteSource {
     final response = await _dio.post(ApiPaths.creditsSpend, data: body);
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> getStats() async {
+    final response = await _dio.get(ApiPaths.creditsStats);
+    return response.data as Map<String, dynamic>;
+  }
 }

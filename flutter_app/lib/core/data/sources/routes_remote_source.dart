@@ -67,10 +67,24 @@ class RoutesRemoteSource {
     return response.data as Map<String, dynamic>;
   }
 
-  Future<void> reportRouteUpdate(int routeId, String tipo) async {
-    await _dio.post(
-      ApiPaths.routeUpdateReport(routeId),
-      data: <String, String>{'tipo': tipo},
+  /// Returns the raw response map so callers can inspect `on_route`.
+  Future<Map<String, dynamic>> reportRouteUpdate(
+    int routeId,
+    String tipo, {
+    double? lat,
+    double? lng,
+  }) async {
+    final body = <String, dynamic>{'tipo': tipo};
+    if (lat != null) body['lat'] = lat;
+    if (lng != null) body['lng'] = lng;
+    final response = await _dio.post(ApiPaths.routeUpdateReport(routeId), data: body);
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<void> updateDeviationReEntry(int routeId, double lat, double lng) async {
+    await _dio.patch(
+      ApiPaths.routeUpdateReEntry(routeId),
+      data: <String, dynamic>{'lat': lat, 'lng': lng},
     );
   }
 }

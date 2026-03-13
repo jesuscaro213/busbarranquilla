@@ -3,11 +3,29 @@ import pool from '../config/database';
 
 const RUTA_REAL_THRESHOLD = 3; // reportes para activar alerta
 
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function minDistToGeometryMeters(lat: number, lng: number, geometry: [number,number][]): number {
+  let min = Infinity;
+  for (const [gLat, gLng] of geometry) {
+    const d = haversineMeters(lat, lng, gLat, gLng);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 // POST /api/routes/:id/update-report
 // Usuario reporta que el bus tomó un camino diferente
 export const reportRouteUpdate = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const { tipo, geometry } = req.body; // 'trancon' | 'ruta_real', geometry?: [lat,lng][]
+  const { tipo, lat, lng } = req.body;
   const userId = (req as any).userId;
 
   if (!['trancon', 'ruta_real'].includes(tipo)) {
@@ -16,11 +34,39 @@ export const reportRouteUpdate = async (req: Request, res: Response): Promise<vo
   }
 
   try {
-    const geomValue = geometry && Array.isArray(geometry) && geometry.length >= 2
-      ? JSON.stringify(geometry)
-      : null;
+    let geomValue: string | null = null;
 
-    // Upsert: si el usuario ya reportó esta ruta, actualiza el tipo, timestamp y geometría
+    if (tipo === 'ruta_real') {
+      const userLat = parseFloat(lat);
+      const userLng = parseFloat(lng);
+
+      if (isNaN(userLat) || isNaN(userLng)) {
+        res.status(400).json({ message: 'lat y lng son requeridos para ruta_real' });
+        return;
+      }
+
+      // Fetch route geometry to validate position
+      const routeResult = await pool.query(
+        `SELECT geometry FROM routes WHERE id = $1`,
+        [id]
+      );
+      const routeGeometry: [number, number][] | null = routeResult.rows[0]?.geometry ?? null;
+
+      if (routeGeometry && routeGeometry.length >= 2) {
+        const distMeters = minDistToGeometryMeters(userLat, userLng, routeGeometry);
+        if (distMeters < 200) {
+          res.status(400).json({
+            on_route: true,
+            message: 'Estás sobre la ruta registrada, el reporte no aplica',
+          });
+          return;
+        }
+      }
+
+      // Valid deviation — store start point
+      geomValue = JSON.stringify([[userLat, userLng]]);
+    }
+
     await pool.query(
       `INSERT INTO route_update_reports (route_id, user_id, tipo, reported_geometry)
        VALUES ($1, $2, $3, $4)
@@ -29,7 +75,6 @@ export const reportRouteUpdate = async (req: Request, res: Response): Promise<vo
       [id, userId, tipo, geomValue]
     );
 
-    // Verificar si se alcanzó el umbral de ruta_real
     const countResult = await pool.query(
       `SELECT COUNT(*) AS total
        FROM route_update_reports
@@ -43,6 +88,58 @@ export const reportRouteUpdate = async (req: Request, res: Response): Promise<vo
     res.json({ ok: true, ruta_real_count: total, threshold_reached: total >= RUTA_REAL_THRESHOLD });
   } catch (error) {
     console.error('Error en reportRouteUpdate:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// PATCH /api/routes/:id/update-report/reentry
+// Called by the Flutter app when GPS re-enters the registered route after a ruta_real report.
+// Updates reported_geometry from [start] to [start, end], giving admin the full outdated segment.
+export const updateDeviationReEntry = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { lat, lng } = req.body;
+  const userId = (req as any).userId;
+
+  const endLat = parseFloat(lat);
+  const endLng = parseFloat(lng);
+
+  if (isNaN(endLat) || isNaN(endLng)) {
+    res.status(400).json({ message: 'lat y lng son requeridos' });
+    return;
+  }
+
+  try {
+    const existing = await pool.query(
+      `SELECT reported_geometry FROM route_update_reports
+       WHERE route_id = $1 AND user_id = $2 AND tipo = 'ruta_real'`,
+      [id, userId]
+    );
+
+    if (existing.rows.length === 0) {
+      res.status(404).json({ message: 'No se encontró un reporte ruta_real activo' });
+      return;
+    }
+
+    const currentGeom: [number, number][] | null = existing.rows[0].reported_geometry;
+
+    // Only update if we have exactly the start point (avoid overwriting a complete segment)
+    if (!currentGeom || currentGeom.length !== 1) {
+      res.json({ ok: true, updated: false });
+      return;
+    }
+
+    const updatedGeom: [number, number][] = [[currentGeom[0][0], currentGeom[0][1]], [endLat, endLng]];
+
+    await pool.query(
+      `UPDATE route_update_reports
+       SET reported_geometry = $1
+       WHERE route_id = $2 AND user_id = $3 AND tipo = 'ruta_real'`,
+      [JSON.stringify(updatedGeom), id, userId]
+    );
+
+    res.json({ ok: true, updated: true });
+  } catch (error) {
+    console.error('Error en updateDeviationReEntry:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };

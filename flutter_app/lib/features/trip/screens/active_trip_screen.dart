@@ -19,8 +19,6 @@ import '../providers/trip_notifier.dart';
 import '../providers/trip_state.dart';
 import '../widgets/report_create_sheet.dart';
 import '../widgets/route_reports_list.dart';
-import '../widgets/route_update_sheet.dart';
-import '../widgets/trip_summary_sheet.dart';
 
 class ActiveTripScreen extends ConsumerStatefulWidget {
   const ActiveTripScreen({super.key});
@@ -40,8 +38,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.read(tripNotifierProvider.notifier).setReportResolvedCallback((msg) {
+      final notifier = ref.read(tripNotifierProvider.notifier);
+      notifier.setReportResolvedCallback((msg) {
         if (mounted) AppSnackbar.show(context, msg, SnackbarType.info);
+      });
+      notifier.setDeviationReEntryCallback((msg) {
+        if (mounted) AppSnackbar.show(context, msg, SnackbarType.success);
       });
       // The dropoff prompt may already be true when this screen first mounts
       // (state was set before navigation — ref.listen misses that transition).
@@ -157,36 +159,102 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     );
   }
 
+  void _confirmEndTrip() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.tripEndConfirmTitle),
+        content: const Text(AppStrings.tripEndConfirmBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(AppStrings.tripEndConfirmNo),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(tripNotifierProvider.notifier).endTrip();
+            },
+            child: const Text(AppStrings.tripEndConfirmYes),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDesvioDialog() {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text(AppStrings.desvioTitle),
-        content: const Text(AppStrings.desvioBody),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              ref.read(tripNotifierProvider.notifier).dismissDesvio();
-              await ref.read(tripNotifierProvider.notifier).createReport('desvio');
-            },
-            child: const Text(AppStrings.desvioReport),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(tripNotifierProvider.notifier).endTrip();
-            },
-            child: const Text(AppStrings.desvioGetOff),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(tripNotifierProvider.notifier).ignoreDesvio();
-            },
-            child: const Text(AppStrings.desvioIgnore),
-          ),
-        ],
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(AppStrings.desvioBody,
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            _DesvioOption(
+              icon: Icons.alt_route,
+              color: Colors.orange,
+              title: AppStrings.desvioTemporal,
+              subtitle: AppStrings.desvioTemporalDesc,
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                ref.read(tripNotifierProvider.notifier).dismissDesvio();
+                await ref.read(tripNotifierProvider.notifier).createReport('desvio');
+              },
+            ),
+            const SizedBox(height: 10),
+            _DesvioOption(
+              icon: Icons.map_outlined,
+              color: AppColors.error,
+              title: AppStrings.desvioRutaDiferente,
+              subtitle: AppStrings.desvioRutaDiferenteDesc,
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                ref.read(tripNotifierProvider.notifier).dismissDesvio();
+                final s = ref.read(tripNotifierProvider);
+                if (s is TripActive) {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final result = await ref
+                      .read(tripNotifierProvider.notifier)
+                      .reportRutaReal(s.route.id, s.route.geometry);
+                  if (!mounted) return;
+                  _showRutaRealResult(messenger, result);
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      ref.read(tripNotifierProvider.notifier).ignoreDesvio();
+                    },
+                    icon: const Icon(Icons.snooze, size: 16),
+                    label: const Text(AppStrings.desvioIgnore),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      ref.read(tripNotifierProvider.notifier).endTrip();
+                    },
+                    icon: const Icon(Icons.logout, size: 16),
+                    label: const Text(AppStrings.desvioGetOff),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -196,6 +264,23 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         DropoffAlert.alight => AppStrings.alightNow,
         DropoffAlert.missed => AppStrings.missedStop,
       };
+
+  void _showRutaRealResult(ScaffoldMessengerState messenger, String result) {
+    final (String msg, Color color) = switch (result) {
+      'on_route' => (AppStrings.desvioRutaRealOnRoute, AppColors.primaryDark),
+      'ok' => (AppStrings.desvioRutaRealSent, AppColors.success),
+      _ => (AppStrings.errorUnknown, AppColors.error),
+    };
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -240,31 +325,16 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
     final state = ref.watch(tripNotifierProvider);
 
-    // ── Trip ended ───────────────────────────────────────────────────────────
+    // ── Trip ended — full summary screen ─────────────────────────────────────
     if (state is TripEnded) {
-      final h = state.tripDuration.inHours.toString().padLeft(2, '0');
-      final m = (state.tripDuration.inMinutes % 60).toString().padLeft(2, '0');
-      return Scaffold(
-        appBar: AppBar(title: const Text(AppStrings.tripSummaryTitle)),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: TripSummarySheet(
-              routeName: state.routeName,
-              durationText: '$h:$m',
-              creditsEarned: state.totalCreditsEarned,
-              distanceMeters: state.distanceMeters,
-              completionBonusEarned: state.completionBonusEarned,
-              onClose: () {
-                ref.read(tripNotifierProvider.notifier).resetToIdle();
-                // Clear planner markers (origin/dest pins) from the map.
-                ref.read(plannerNotifierProvider.notifier).reset();
-                ref.read(mapActivePositionsProvider.notifier).state = const <LatLng>[];
-                if (mounted) context.go('/map');
-              },
-            ),
-          ),
-        ),
+      return _TripSummaryScreen(
+        ended: state,
+        onClose: () {
+          ref.read(tripNotifierProvider.notifier).resetToIdle();
+          ref.read(plannerNotifierProvider.notifier).reset();
+          ref.read(mapActivePositionsProvider.notifier).state = const <LatLng>[];
+          if (mounted) context.go('/map');
+        },
       );
     }
 
@@ -397,25 +467,31 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _TripDurationText(startedAt: active.trip.startedAt),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${active.trip.creditsEarned} cr',
-                      style: const TextStyle(
-                        color: Colors.amber,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
+                    // Timer badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
                       ),
+                      child: _TripDurationText(startedAt: active.trip.startedAt),
                     ),
                     const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        AppBottomSheet.show<void>(
-                          context,
-                          child: RouteUpdateSheet(routeId: active.route.id),
-                        );
-                      },
-                      child: const Icon(Icons.warning_amber_outlined, color: Colors.white70, size: 20),
+                    // Credits badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.amber,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '+${active.trip.creditsEarned} cr',
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -562,7 +638,19 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                               child: ReportCreateSheet(
                                 onSelectType: (type) async {
                                   context.pop();
-                                  await ref.read(tripNotifierProvider.notifier).createReport(type);
+                                  if (type == 'ruta_real') {
+                                    final s = ref.read(tripNotifierProvider);
+                                    if (s is TripActive) {
+                                      final messenger = ScaffoldMessenger.of(context);
+                                      final result = await ref
+                                          .read(tripNotifierProvider.notifier)
+                                          .reportRutaReal(s.route.id, s.route.geometry);
+                                      if (!mounted) return;
+                                      _showRutaRealResult(messenger, result);
+                                    }
+                                  } else {
+                                    await ref.read(tripNotifierProvider.notifier).createReport(type);
+                                  }
                                 },
                               ),
                             );
@@ -572,17 +660,373 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // Me bajé
+                      // Me bajé (with confirmation)
                       Expanded(
                         flex: 2,
                         child: AppButton.destructive(
                           label: AppStrings.tripEndButton,
-                          onPressed: () => ref.read(tripNotifierProvider.notifier).endTrip(),
+                          onPressed: () => _confirmEndTrip(),
                         ),
                       ),
                     ],
                   ),
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Trip summary full-screen ──────────────────────────────────────────────────
+class _TripSummaryScreen extends StatelessWidget {
+  final TripEnded ended;
+  final VoidCallback onClose;
+
+  const _TripSummaryScreen({required this.ended, required this.onClose});
+
+  String get _distanceText {
+    if (ended.distanceMeters >= 1000) {
+      return '${(ended.distanceMeters / 1000).toStringAsFixed(1)} ${AppStrings.tripKmSuffix}';
+    }
+    return '${ended.distanceMeters} ${AppStrings.tripMetersSuffix}';
+  }
+
+  String get _durationText {
+    final h = ended.tripDuration.inHours.toString().padLeft(2, '0');
+    final m = (ended.tripDuration.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (ended.tripDuration.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    final botPad = MediaQuery.of(context).padding.bottom;
+
+    return Scaffold(
+      backgroundColor: AppColors.primaryDark,
+      body: Column(
+        children: <Widget>[
+          // Header
+          SizedBox(
+            height: topPad + 140,
+            child: Padding(
+              padding: EdgeInsets.only(top: topPad + 24),
+              child: Column(
+                children: <Widget>[
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: AppColors.success.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.success, width: 2.5),
+                    ),
+                    child: const Icon(Icons.check_rounded, color: AppColors.success, size: 40),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    AppStrings.tripSummaryCompleted,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ended.routeName,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 13,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // White card
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(20, 28, 20, botPad + 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    // Big credits number
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: <Color>[
+                            AppColors.primary.withValues(alpha: 0.08),
+                            AppColors.primary.withValues(alpha: 0.02),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                        ),
+                      ),
+                      child: Column(
+                        children: <Widget>[
+                          Text(
+                            '+${ended.totalCreditsEarned}',
+                            style: const TextStyle(
+                              fontSize: 52,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            AppStrings.tripCreditsLabel,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          if (ended.completionBonusEarned) ...<Widget>[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.success.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                AppStrings.tripCompletionBonus,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.success,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Stats row
+                    Row(
+                      children: <Widget>[
+                        _StatCard(
+                          icon: Icons.timer_outlined,
+                          label: AppStrings.tripDurationLabel,
+                          value: _durationText,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        _StatCard(
+                          icon: Icons.straighten_outlined,
+                          label: AppStrings.tripDistanceLabel,
+                          value: _distanceText,
+                          color: Colors.teal,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Reports card
+                    _StatCardWide(
+                      icon: Icons.campaign_outlined,
+                      label: AppStrings.tripSummaryReports,
+                      value: ended.reportsCreated > 0
+                          ? '${ended.reportsCreated} ${ended.reportsCreated == 1 ? 'reporte' : 'reportes'}'
+                          : AppStrings.tripSummaryNoReports,
+                      color: ended.reportsCreated > 0 ? Colors.orange.shade700 : Colors.grey,
+                      subtitle: ended.reportsCreated > 0
+                          ? 'Gracias por ayudar a la comunidad'
+                          : null,
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Streak card
+                    _StatCardWide(
+                      icon: Icons.local_fire_department_outlined,
+                      label: AppStrings.tripSummaryStreakLabel,
+                      value: ended.streakDays > 0
+                          ? '${ended.streakDays} ${AppStrings.tripSummaryStreakDays}'
+                          : AppStrings.tripSummaryStreakNone,
+                      color: ended.streakDays >= 7
+                          ? Colors.deepOrange
+                          : ended.streakDays > 0
+                              ? Colors.orange
+                              : Colors.grey,
+                      subtitle: ended.streakDays >= 7 ? '¡Bonus de +30 cr activo!' : null,
+                    ),
+
+                    if (!ended.completionBonusEarned && ended.distanceMeters < 2000) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Icon(Icons.info_outline, color: Colors.amber.shade700, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                AppStrings.tripShortDistance,
+                                style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+
+                    FilledButton.icon(
+                      onPressed: onClose,
+                      icon: const Icon(Icons.home_outlined),
+                      label: const Text(AppStrings.tripClose),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primaryDark,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatCardWide extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final String? subtitle;
+
+  const _StatCardWide({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+                if (subtitle != null) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
+                ],
               ],
             ),
           ),
@@ -629,7 +1073,7 @@ class _TripDurationTextState extends State<_TripDurationText> {
     final s = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return Text(
       '$h:$m:$s',
-      style: const TextStyle(color: Colors.white70, fontSize: 13),
+      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
     );
   }
 }
@@ -666,6 +1110,65 @@ class _OccupancyBadge extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Desvío option tile ────────────────────────────────────────────────────────
+class _DesvioOption extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _DesvioOption({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+          borderRadius: BorderRadius.circular(10),
+          color: color.withValues(alpha: 0.05),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, color: color, size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: color,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: color, size: 18),
           ],
         ),
       ),

@@ -42,11 +42,19 @@ class TripNotifier extends Notifier<TripState> {
 
   DateTime? _occupancyCooldownEnd;
   final Set<String> _occupancyCredited = <String>{};
+  int _reportsCreatedThisTrip = 0;
 
   void Function(String message)? _onReportResolved;
+  void Function(String message)? _onDeviationReEntry;
+  Timer? _deviationReEntryTimer;
+  int? _deviationRouteId;
 
   void setReportResolvedCallback(void Function(String message) cb) {
     _onReportResolved = cb;
+  }
+
+  void setDeviationReEntryCallback(void Function(String message) cb) {
+    _onDeviationReEntry = cb;
   }
 
   @override
@@ -198,6 +206,7 @@ class TripNotifier extends Notifier<TripState> {
 
     _occupancyCooldownEnd = null;
     _occupancyCredited.clear();
+    _reportsCreatedThisTrip = 0;
     _lastGpsAt = DateTime.now();
 
     state = activeState;
@@ -221,6 +230,7 @@ class TripNotifier extends Notifier<TripState> {
     final duration = startedAt != null
         ? DateTime.now().difference(startedAt)
         : Duration.zero;
+    final reportsCreated = _reportsCreatedThisTrip;
 
     _disposeMonitorsAndTimers();
     final socket = ref.read(socketServiceProvider);
@@ -231,9 +241,16 @@ class TripNotifier extends Notifier<TripState> {
     socket.off('route:report_confirmed');
     socket.off('route:report_resolved');
 
-    final result = await ref.read(tripsRepositoryProvider).end();
+    // Run both requests in parallel for speed.
+    final results = await Future.wait<Object?>(<Future<Object?>>[
+      ref.read(tripsRepositoryProvider).end(),
+      ref.read(creditsRepositoryProvider).getReportStreak(),
+    ]);
 
-    switch (result) {
+    final endResult = results[0];
+    final streakDays = (results[1] as int?) ?? 0;
+
+    switch (endResult) {
       case Success<TripEndResult>(data: final data):
         state = TripEnded(
           routeName: routeName,
@@ -241,8 +258,12 @@ class TripNotifier extends Notifier<TripState> {
           distanceMeters: data.distanceMeters,
           completionBonusEarned: data.completionBonusEarned,
           tripDuration: duration,
+          reportsCreated: reportsCreated,
+          streakDays: streakDays,
         );
       case Failure<TripEndResult>():
+        state = const TripIdle();
+      default:
         state = const TripIdle();
     }
   }
@@ -276,6 +297,77 @@ class TripNotifier extends Notifier<TripState> {
     if (state is TripActive) {
       state = (state as TripActive).copyWith(desvioDetected: false);
     }
+  }
+
+  /// Reports "ruta diferente al mapa" with GPS validation.
+  ///
+  /// Returns:
+  ///   'on_route' — GPS is currently on the registered route (report invalid)
+  ///   'ok'       — report accepted, re-entry monitoring started
+  ///   'error'    — network or unexpected error
+  Future<String> reportRutaReal(int routeId, List<LatLng> geometry) async {
+    // Fast path: use last known position; fall back to full GPS fix.
+    Position? pos;
+    try {
+      pos = await Geolocator.getLastKnownPosition();
+    } catch (_) {}
+    pos ??= await LocationService.getCurrentPosition();
+    if (pos == null) return 'error';
+
+    final result = await ref.read(routesRepositoryProvider).reportRouteUpdate(
+      routeId,
+      'ruta_real',
+      lat: pos.latitude,
+      lng: pos.longitude,
+    );
+
+    if (result.onRoute) return 'on_route';
+    if (!result.ok) return 'error';
+
+    // Report accepted — start re-entry monitor.
+    _deviationRouteId = routeId;
+    _deviationReEntryTimer?.cancel();
+    _deviationReEntryTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (state is! TripActive) {
+        _deviationReEntryTimer?.cancel();
+        _deviationReEntryTimer = null;
+        return;
+      }
+      if (geometry.isEmpty) return;
+
+      Position? current;
+      try {
+        current = await Geolocator.getLastKnownPosition();
+      } catch (_) {}
+      if (current == null) return;
+      // Re-check state after the async GPS fetch — trip may have ended meanwhile.
+      if (state is! TripActive) return;
+
+      final dist = LocationService.minDistToPolyline(
+        current.latitude,
+        current.longitude,
+        geometry,
+      );
+
+      if (dist < 200) {
+        _deviationReEntryTimer?.cancel();
+        _deviationReEntryTimer = null;
+        final routeIdToUpdate = _deviationRouteId;
+        _deviationRouteId = null;
+        if (routeIdToUpdate != null) {
+          unawaited(
+            ref.read(routesRepositoryProvider).updateDeviationReEntry(
+              routeIdToUpdate,
+              current.latitude,
+              current.longitude,
+            ),
+          );
+        }
+        _onDeviationReEntry?.call(AppStrings.desvioRutaRealReEntry);
+      }
+    });
+
+    return 'ok';
   }
 
   Future<void> activateDropoffAlerts() async {
@@ -388,6 +480,7 @@ class TripNotifier extends Notifier<TripState> {
 
     switch (result) {
       case Success<Report>():
+        _reportsCreatedThisTrip++;
         if (isOccupancy) {
           _occupancyCooldownEnd = DateTime.now().add(const Duration(minutes: 10));
           _occupancyCredited.add(type);
@@ -621,6 +714,9 @@ class TripNotifier extends Notifier<TripState> {
     _gpsCheckTimer = null;
     _occupancyPollTimer?.cancel();
     _occupancyPollTimer = null;
+    _deviationReEntryTimer?.cancel();
+    _deviationReEntryTimer = null;
+    _deviationRouteId = null;
     _disposeMonitorsOnly();
   }
 }

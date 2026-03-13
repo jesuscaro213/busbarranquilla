@@ -353,7 +353,8 @@ export const updateTripDestination = async (req: Request, res: Response): Promis
       `UPDATE active_trips
        SET custom_destination_lat  = $1,
            custom_destination_lng  = $2,
-           custom_destination_name = $3
+           custom_destination_name = $3,
+           destination_stop_id     = NULL
        WHERE user_id = $4 AND is_active = true
        RETURNING id`,
       [latitude, longitude, name ?? null, userId]

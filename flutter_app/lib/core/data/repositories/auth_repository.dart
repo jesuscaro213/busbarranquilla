@@ -88,6 +88,14 @@ class AuthRepository {
     }
   }
 
+  Future<void> updateFcmToken(String token) async {
+    try {
+      await _source.updateFcmToken(token);
+    } catch (_) {
+      // Non-critical — never surface to the user
+    }
+  }
+
   Future<Result<void>> loginWithGoogle(String idToken) async {
     try {
       final data = await _source.loginWithGoogle(idToken);

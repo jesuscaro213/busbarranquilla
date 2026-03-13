@@ -603,6 +603,7 @@ Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpa
 - Sistema anti-fraude: cooldown 5 min entre viajes, bono completar ≥2 km, `suspicious_minutes` (inactividad 30min → cierre automático descontando minutos sospechosos)
 - **DesvíoMonitor unificado**: umbral 100m / 60s en ambas ramas (geometría y paradas fallback)
 - **Planner nearby auto-refresh**: `Timer.periodic(2 min)` en `PlannerNotifier` cuando origen es GPS, cancelado al cambiar a dirección tipificada o al hacer `reset()`
+- **Firebase Cloud Messaging (push notifications)**: `firebase_core ^3.6.0` + `firebase_messaging ^15.1.3` en Flutter; `firebase-admin ^12.7.0` en backend; `NotificationService` en `core/notifications/`; token FCM guardado en `users.fcm_token`; `PATCH /api/auth/fcm-token` (auth); push en: reporte creado (→ pasajeros activos en la ruta), trancón resuelto (→ pasajeros activos), viaje finalizado (→ usuario); tap en notif navega a `/trip` o `/profile/trips` según tipo
 - Rate limiting: auth (20/15min), reports (15/5min), general (300/1min)
 - Cron zombie trips (>4h sin actualización → cerrar)
 - **Alerta de bajada para usuarios free**: prompt en initState (no en ref.listen), vibración 3x heavyImpact, GPS vía getLastKnownPosition (rápido)
@@ -625,8 +626,7 @@ Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpa
 - **PremiumCard**: lista de beneficios no-premium ahora muestra `Icons.check_circle_rounded` antes de cada feature
 
 ### Pendiente 🚧
-- Firebase push notifications (flutter_local_notifications ya instalado)
-- Publicación en Google Play (requiere google-services.json + SHA-1 Firebase)
+- Publicación en Google Play (requiere SHA-1 Firebase + signing config en release build)
 - Flujo de pago Wompi in-app (actualmente abre navegador)
 - Alianza con AMB y SIBUS Barranquilla
 
@@ -685,4 +685,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-13 (v12)*
+*Última actualización: 2026-03-13 (v13)*

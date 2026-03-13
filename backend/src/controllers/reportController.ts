@@ -3,6 +3,7 @@ import pool from '../config/database';
 import { awardCredits } from './creditController';
 import { getIo } from '../config/socket';
 import { getRedisClient } from '../config/redis';
+import { sendPushToUsers, sendPushToUser, REPORT_LABELS } from '../services/pushNotificationService';
 
 const VALID_TYPES = [
   'bus_location', 'traffic', 'bus_full', 'no_service', 'detour',
@@ -274,6 +275,22 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
           is_valid: otherActiveUsers === 0,
         },
       });
+
+      // Push a otros pasajeros activos en la misma ruta (app en background)
+      const othersRes = await pool.query(
+        `SELECT u.fcm_token FROM active_trips t
+         JOIN users u ON u.id = t.user_id
+         WHERE t.route_id = $1 AND t.is_active = true
+           AND t.user_id != $2 AND u.fcm_token IS NOT NULL`,
+        [route_id, userId],
+      );
+      const tokens = othersRes.rows.map((r: { fcm_token: string }) => r.fcm_token);
+      const label = REPORT_LABELS[type] ?? `Nuevo reporte: ${type}`;
+      void sendPushToUsers(tokens, '🚌 MiBus', label, {
+        type: 'report',
+        routeId: String(route_id),
+        reportType: type,
+      });
     }
 
     res.status(201).json({
@@ -379,6 +396,21 @@ export const resolveReport = async (req: Request, res: Response): Promise<void> 
         type: report.type,
         duration_minutes: durationMinutes,
       });
+
+      // Push a pasajeros activos en la ruta (app en background)
+      if (report.type === 'trancon') {
+        const passengersRes = await pool.query(
+          `SELECT u.fcm_token FROM active_trips t
+           JOIN users u ON u.id = t.user_id
+           WHERE t.route_id = $1 AND t.is_active = true AND u.fcm_token IS NOT NULL`,
+          [report.route_id],
+        );
+        const tokens = passengersRes.rows.map((r: { fcm_token: string }) => r.fcm_token);
+        void sendPushToUsers(tokens, '✅ Trancón despejado', `El trancón en tu ruta fue resuelto en ${durationMinutes} min`, {
+          type: 'report_resolved',
+          routeId: String(report.route_id),
+        });
+      }
     }
 
     res.json({ message: 'Reporte resuelto correctamente', duration_minutes: durationMinutes });

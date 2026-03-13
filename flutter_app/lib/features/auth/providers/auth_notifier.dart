@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../../core/data/repositories/auth_repository.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
+import '../../../core/notifications/notification_service.dart';
 import 'auth_state.dart';
 
 class AuthNotifier extends Notifier<AuthState> {
@@ -108,6 +109,21 @@ class AuthNotifier extends Notifier<AuthState> {
       Success(data: final user) => Authenticated(user),
       Failure() => const Unauthenticated(),
     };
+
+    // Fire-and-forget: register FCM token after successful auth
+    if (state is Authenticated) {
+      _registerFcmToken();
+    }
+  }
+
+  Future<void> _registerFcmToken() async {
+    try {
+      final token = await NotificationService.getToken();
+      if (token == null) return;
+      await ref.read(authRepositoryProvider).updateFcmToken(token);
+    } catch (_) {
+      // Non-critical
+    }
   }
 }
 

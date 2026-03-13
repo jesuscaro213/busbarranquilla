@@ -338,6 +338,25 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
+// Registrar o actualizar FCM token del usuario autenticado
+export const updateFcmToken = async (req: Request, res: Response): Promise<void> => {
+  const { fcm_token } = req.body as { fcm_token?: string };
+  const userId = (req as any).userId as number;
+
+  const token = (fcm_token ?? '').trim();
+
+  try {
+    await pool.query(
+      'UPDATE users SET fcm_token = $1 WHERE id = $2',
+      [token || null, userId],
+    );
+    res.json({ message: 'FCM token actualizado' });
+  } catch (error) {
+    console.error('Error actualizando fcm_token:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // Actualizar perfil básico del usuario autenticado
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
   const { name } = req.body as { name?: string };

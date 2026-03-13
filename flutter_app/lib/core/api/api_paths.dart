@@ -5,6 +5,7 @@ abstract final class ApiPaths {
   static const register = '/api/auth/register';
   static const profile = '/api/auth/profile';
   static const authGoogle = '/api/auth/google';
+  static const authFcmToken = '/api/auth/fcm-token';
 
   static const routes = '/api/routes';
   static const routesNearby = '/api/routes/nearby';

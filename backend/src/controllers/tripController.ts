@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import { awardCredits } from './creditController';
 import { getIo } from '../config/socket';
+import { sendPushToUser } from '../services/pushNotificationService';
 
 const MAX_TRIP_LOCATION_CREDITS = 15; // máx créditos por ubicación en un viaje (~15 min activos)
 
@@ -234,6 +235,22 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
       tripId: trip.id,
       routeId: trip.route_id,
     });
+
+    // Push al usuario con resumen del viaje (útil si cerró la app mientras viajaba)
+    if (totalEarned > 0) {
+      const userTokenRes = await pool.query(
+        'SELECT fcm_token FROM users WHERE id = $1',
+        [userId],
+      );
+      const fcmToken: string | null = userTokenRes.rows[0]?.fcm_token ?? null;
+      const creditWord = totalEarned === 1 ? 'crédito' : 'créditos';
+      void sendPushToUser(
+        fcmToken,
+        '🎉 Viaje finalizado',
+        `Ganaste ${totalEarned} ${creditWord} por este viaje`,
+        { type: 'trip_ended', credits: String(totalEarned) },
+      );
+    }
 
     res.json({
       trip: updated.rows[0],

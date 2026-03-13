@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'core/notifications/notification_service.dart';
 
 import 'core/l10n/strings.dart';
 import 'core/storage/onboarding_storage.dart' show onboardingDoneProvider;
@@ -159,11 +160,49 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-class MiBusApp extends ConsumerWidget {
+class MiBusApp extends ConsumerStatefulWidget {
   const MiBusApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MiBusApp> createState() => _MiBusAppState();
+}
+
+class _MiBusAppState extends ConsumerState<MiBusApp> {
+  @override
+  void initState() {
+    super.initState();
+
+    // App opened from background by tapping a notification
+    NotificationService.setOnMessageOpenedApp(_handleNotificationTap);
+
+    // App launched from terminated state by tapping a notification
+    NotificationService.getInitialMessage().then((message) {
+      if (message != null) _handleNotificationTap(message.data);
+    });
+  }
+
+  void _handleNotificationTap(Map<String, dynamic> data) {
+    final router = ref.read(appRouterProvider);
+    final type = data['type'] as String?;
+    final routeId = data['routeId'] as String?;
+
+    switch (type) {
+      case 'report':
+        // New report on a route the user is on → go to active trip screen
+        router.go('/trip');
+      case 'report_resolved':
+        router.go('/trip');
+      case 'trip_ended':
+        router.go('/profile/trips');
+      default:
+        if (routeId != null) {
+          router.go('/trip');
+        }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // GoRouter is created once — do NOT watch auth state here.
     // Changes trigger GoRouter.refreshListenable instead.
     final router = ref.watch(appRouterProvider);

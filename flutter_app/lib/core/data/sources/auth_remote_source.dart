@@ -36,4 +36,11 @@ class AuthRemoteSource {
     );
     return response.data as Map<String, dynamic>;
   }
+
+  Future<void> updateFcmToken(String token) async {
+    await _dio.patch(
+      ApiPaths.authFcmToken,
+      data: <String, dynamic>{'fcm_token': token},
+    );
+  }
 }

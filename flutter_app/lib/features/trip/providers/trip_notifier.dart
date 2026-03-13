@@ -249,7 +249,7 @@ class TripNotifier extends Notifier<TripState> {
     _startOccupancyPolling(routeId);
   }
 
-  Future<void> endTrip() async {
+  Future<void> endTrip({int suspiciousMinutes = 0}) async {
     if (state is! TripActive) {
       state = const TripIdle();
       return;
@@ -272,9 +272,13 @@ class TripNotifier extends Notifier<TripState> {
     socket.off('route:report_confirmed');
     socket.off('route:report_resolved');
 
+    final endBody = suspiciousMinutes > 0
+        ? <String, dynamic>{'suspicious_minutes': suspiciousMinutes}
+        : null;
+
     // Run both requests in parallel for speed.
     final results = await Future.wait<Object?>(<Future<Object?>>[
-      ref.read(tripsRepositoryProvider).end(),
+      ref.read(tripsRepositoryProvider).end(body: endBody),
       ref.read(creditsRepositoryProvider).getReportStreak(),
     ]);
 
@@ -721,7 +725,10 @@ class TripNotifier extends Notifier<TripState> {
           state = (state as TripActive)
               .copyWith(showInactivityModal: false, showSuspiciousModal: true);
         }
-        Future<void>.delayed(const Duration(seconds: 5), () => endTrip());
+        Future<void>.delayed(
+          const Duration(seconds: 120),
+          () => endTrip(suspiciousMinutes: 30),
+        );
       },
       onAutoEnd: () {
         unawaited(endTrip());

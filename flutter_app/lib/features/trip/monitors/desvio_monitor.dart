@@ -99,7 +99,7 @@ class DesvioMonitor {
           return d < min ? d : min;
         },
       );
-      if (minDistMeters > 250) {
+      if (minDistMeters > 100) {
         _offRouteAt ??= DateTime.now();
         if (DateTime.now().difference(_offRouteAt!).inSeconds >= 60) {
           _alerted = true;

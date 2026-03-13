@@ -138,8 +138,8 @@ ShellRoute (BottomNavigationBar 4 tabs):
 | Monitor | Intervalo | Trigger | Acción |
 |---------|-----------|---------|--------|
 | Auto-resolve trancón | 120s | Bus movió >1 km del reporte | `PATCH /api/reports/:id/resolve` |
-| Detección desvío | 30s | Fuera de ruta >250m por ≥90s | Banner: reportar / bajarse / ignorar 5min |
-| Inactividad | 60s | Sin movimiento <50m por ≥600s | Modal "¿Sigues en el bus?" — auto-cierre 120s |
+| Detección desvío | 15s | Fuera de ruta >100m por ≥60s | Banner: reportar / bajarse / ignorar 5min |
+| Inactividad | 60s | Sin movimiento <50m por ≥600s | Modal "¿Sigues en el bus?" — auto-cierre 120s; a los 30 min cierra viaje con `suspicious_minutes: 30` |
 | Alerta bajada | 15s | Destino fijado | Prepararse (400m) → Bájate ya (200m + vibración) → Perdiste |
 
 **Posición del bus en tiempo real:**
@@ -160,6 +160,12 @@ ShellRoute (BottomNavigationBar 4 tabs):
 3. Ícono de mapa en campo → `/map-pick?lat=X&lng=Y` → crosshair → geocodificación inversa → regresa resultado
 4. "Buscar rutas" → `POST /api/routes/plan` → `PlannerResults`
 5. Tap resultado → `context.push('/trip/confirm?routeId=X&destLat=Y&destLng=Z')`
+
+**Auto-refresh de rutas cercanas (planner):**
+- `PlannerNotifier` arranca un `Timer.periodic(2 min)` cuando el origen es GPS (`displayName == AppStrings.currentLocationLabel`).
+- El timer llama `loadNearbyForOrigin()` solo si `state is PlannerIdle` (no interrumpe búsqueda ni resultados).
+- El timer se cancela en `reset()` y en `ref.onDispose`.
+- Si el origen se cambia a una dirección tipificada, el timer NO se crea (`_originIsGps = false`).
 
 ### 4. Sistema de créditos
 | Acción | Créditos |
@@ -509,7 +515,7 @@ SnackbarType.info
 ```
 
 ### Flutter — Diálogo de desvío (4 opciones)
-Cuando el `DesvioMonitor` detecta que el bus se alejó ≥250m de la ruta por ≥90s, muestra un `AlertDialog` con:
+Cuando el `DesvioMonitor` detecta que el bus se alejó ≥100m de la ruta por ≥60s, muestra un `AlertDialog` con:
 1. 🟠 **Desvío temporal (trancón)** — `createReport('desvio')` — reporte normal 30 min, no alerta admin
 2. 🔴 **La ruta del bus es diferente al mapa** — `notifier.reportRutaReal()` con validación inteligente (ver abajo)
 3. **Ignorar 5 min** (outlined) — pausa el monitor
@@ -594,7 +600,9 @@ Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpa
 - Backend completo: auth, rutas, paradas, reportes, créditos, viajes, favoritos, pagos Wompi
 - Web admin panel: users, routes (editor geometría OSRM), companies, route alerts, stats dashboard
 - Flutter app completa: auth (email + Google), onboarding, mapa, boarding flow, viaje activo (4 monitores), planificador, perfil, créditos, favoritos, premium
-- Sistema anti-fraude: cooldown 5 min entre viajes, bono completar ≥2 km
+- Sistema anti-fraude: cooldown 5 min entre viajes, bono completar ≥2 km, `suspicious_minutes` (inactividad 30min → cierre automático descontando minutos sospechosos)
+- **DesvíoMonitor unificado**: umbral 100m / 60s en ambas ramas (geometría y paradas fallback)
+- **Planner nearby auto-refresh**: `Timer.periodic(2 min)` en `PlannerNotifier` cuando origen es GPS, cancelado al cambiar a dirección tipificada o al hacer `reset()`
 - Rate limiting: auth (20/15min), reports (15/5min), general (300/1min)
 - Cron zombie trips (>4h sin actualización → cerrar)
 - **Alerta de bajada para usuarios free**: prompt en initState (no en ref.listen), vibración 3x heavyImpact, GPS vía getLastKnownPosition (rápido)
@@ -677,4 +685,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-13 (v11)*
+*Última actualización: 2026-03-13 (v12)*

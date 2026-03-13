@@ -35,9 +35,15 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   NominatimResult? _selectedOrigin;
   NominatimResult? _selectedDest;
+  bool _originIsGps = false;
+  Timer? _nearbyRefreshTimer;
 
   @override
   PlannerState build() {
+    ref.onDispose(() {
+      _nearbyRefreshTimer?.cancel();
+      _nearbyRefreshTimer = null;
+    });
     return const PlannerIdle();
   }
 
@@ -58,6 +64,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   void setOrigin(NominatimResult origin) {
     _selectedOrigin = origin;
+    _originIsGps = origin.displayName == AppStrings.currentLocationLabel;
 
     if (state is PlannerResults) {
       final current = state as PlannerResults;
@@ -74,6 +81,19 @@ class PlannerNotifier extends Notifier<PlannerState> {
     );
 
     unawaited(loadNearbyForOrigin(origin));
+    _restartNearbyRefreshTimer();
+  }
+
+  void _restartNearbyRefreshTimer() {
+    _nearbyRefreshTimer?.cancel();
+    _nearbyRefreshTimer = null;
+    if (!_originIsGps) return;
+
+    _nearbyRefreshTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      final origin = _selectedOrigin;
+      if (origin == null || state is! PlannerIdle) return;
+      unawaited(loadNearbyForOrigin(origin));
+    });
   }
 
   void setDestination(NominatimResult destination) {
@@ -97,6 +117,9 @@ class PlannerNotifier extends Notifier<PlannerState> {
   void reset() {
     _selectedOrigin = null;
     _selectedDest = null;
+    _originIsGps = false;
+    _nearbyRefreshTimer?.cancel();
+    _nearbyRefreshTimer = null;
     state = const PlannerIdle();
   }
 

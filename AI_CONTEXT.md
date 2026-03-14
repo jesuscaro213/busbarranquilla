@@ -583,14 +583,24 @@ if (!mounted) return;
 messenger.showSnackBar(...); // usar messenger, no context
 ```
 
-### Flutter — Vibración fuerte triple
+### Flutter — Vibración con paquete `vibration`
 
-Al disparar `onAlight` en `DropoffMonitor`:
+`HapticFeedback` (flutter/services) es para feedback táctil de UI y resulta imperceptible desde timers. Se reemplazó por el paquete `vibration ^2.0.0` que llama directamente al `Vibrator` de Android con intensidad y patrón explícitos.
+
+| Momento | Patrón | Intensidad |
+|---|---|---|
+| `onDesvio` (ruta diferente) | 5 pulsos × 300 ms, pausa 150 ms | 255 (máxima) |
+| `onPrepare` (≤700 m a parada) | 2 pulsos × 200 ms, pausa 200 ms | 180 (media) |
+| `onAlight` (≤200 m a parada) | 5 pulsos × 400 ms, pausa 150 ms | 255 (máxima) |
+
 ```dart
-HapticFeedback.heavyImpact();
-Future<void>.delayed(const Duration(milliseconds: 350), HapticFeedback.heavyImpact);
-Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpact);
+Vibration.vibrate(
+  pattern: [0, 400, 150, 400, 150, 400, 150, 400, 150, 400],
+  intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+);
 ```
+
+`import 'package:flutter/services.dart'` eliminado de `trip_notifier.dart`.
 
 ---
 
@@ -606,7 +616,9 @@ Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpa
 - **Firebase Cloud Messaging (push notifications)**: `firebase_core ^3.6.0` + `firebase_messaging ^15.1.3` en Flutter; `firebase-admin ^12.7.0` en backend; `NotificationService` en `core/notifications/`; token FCM guardado en `users.fcm_token`; `PATCH /api/auth/fcm-token` (auth); push en: reporte creado (→ pasajeros activos en la ruta), trancón resuelto (→ pasajeros activos), viaje finalizado (→ usuario); tap en notif navega a `/trip` o `/profile/trips` según tipo
 - Rate limiting: auth (20/15min), reports (15/5min), general (300/1min)
 - Cron zombie trips (>4h sin actualización → cerrar)
-- **Alerta de bajada para usuarios free**: prompt en initState (no en ref.listen), vibración 3x heavyImpact, GPS vía getLastKnownPosition (rápido)
+- **Alerta de bajada — vibración real**: paquete `vibration ^2.0.0` reemplaza `HapticFeedback`; `onPrepare` a 700m (antes 400m) = 2 pulsos medios + notif push; `onAlight` a 200m = 5 pulsos máximos + notif push urgente (`fullScreenIntent`)
+- **Desvío — alerta urgente**: vibración 5 pulsos máximos + `NotificationService.showAlert()` al detectar desvío ≥100m por ≥60s
+- **Alerta de bajada para usuarios free**: prompt en initState (no en ref.listen), GPS vía getLastKnownPosition (rápido)
 - **Confirmación antes de "Me bajé"**: AlertDialog destructivo
 - **Resumen de viaje rediseñado**: pantalla completa con créditos grandes, duración, distancia, reportes creados, racha de días (cargado en paralelo con endTrip)
 - **Reporte "Ruta diferente al mapa" inteligente**: validación GPS doble (cliente + backend), re-entry timer 15s, guarda tramo desactualizado en reported_geometry
@@ -685,4 +697,4 @@ busbarranquilla/
 ---
 
 *Este archivo se actualiza automáticamente con cada cambio relevante al proyecto MiBus.*
-*Última actualización: 2026-03-13 (v13)*
+*Última actualización: 2026-03-13 (v14)*

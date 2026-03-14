@@ -2,27 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## ⚠️ REGLA #1 — OBLIGATORIO SIN EXCEPCIÓN
+## 🚨 REGLA #1 — BLOQUEO TOTAL: ACTUALIZA DOCS ANTES DE TERMINAR
 
-**Al terminar CUALQUIER tarea** (fix, feature, refactor, cambio de assets, nuevo patrón, etc.) **DEBES actualizar `AI_CONTEXT.md` Y `CLAUDE.md` antes de responder "listo".**
+**NUNCA termines una tarea sin haber actualizado `AI_CONTEXT.md` y `MEMORY.md`.**
+Esto no es sugerencia. Es el último paso obligatorio de TODA tarea, sin importar su tamaño.
 
-No es opcional. No importa si el cambio parece pequeño. Si tocaste código, actualizas los docs.
+### Orden de ejecución obligatorio al finalizar CUALQUIER tarea:
+
+1. ✅ Implementa el cambio
+2. ✅ Ejecuta `flutter analyze` (si es Flutter) o verifica que compila
+3. ✅ **Actualiza `AI_CONTEXT.md`** — SIEMPRE, aunque el cambio sea de una línea
+4. ✅ **Actualiza `MEMORY.md`** (y el archivo de memoria correspondiente) — SIEMPRE
+5. ✅ Responde al usuario
+
+**Si saltaste el paso 3 o 4, NO has terminado la tarea.**
 
 ### Qué actualizar en `AI_CONTEXT.md`:
 - Nuevos endpoints → sección "API endpoints principales"
 - Cambios en DB → sección "Esquema de base de datos"
-- Nuevos patrones o bugs corregidos → sección "Patrones de código importantes"
+- Nuevos patrones, bugs corregidos, thresholds cambiados → sección "Patrones de código importantes"
 - Features completadas → sección "Estado del proyecto"
 - Cambios en flujos clave → sección "Flujos clave"
-- Siempre actualizar la fecha de "Última actualización" al final del archivo
+- Nuevos paquetes añadidos → sección Flutter stack
+- **SIEMPRE** actualizar `*Última actualización: YYYY-MM-DD (vN)*` al final del archivo
+
+### Qué actualizar en `MEMORY.md`:
+- Bugs no obvios corregidos → sección "Known bugs fixed" o archivo `feedback_*.md`
+- Nuevos patrones o restricciones → sección relevante o archivo nuevo
+- Thresholds, valores numéricos clave, nombres de paquetes
+- Cualquier decisión de diseño que no sea evidente leyendo el código
 
 ### Qué actualizar en `CLAUDE.md`:
 - Nuevas fases completadas → sección "Development Phases"
 - Cambios en arquitectura o patrones → secciones correspondientes
-
-### Cuándo actualizar la memoria del proyecto (`~/.claude/.../memory/`):
-- Bugs corregidos no obvios → memoria `feedback`
-- Patrones importantes descubiertos → memoria `feedback` o `project`
 
 ## What is this?
 

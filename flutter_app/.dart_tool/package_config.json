@@ -200,6 +200,18 @@
       "languageVersion": "2.17"
     },
     {
+      "name": "device_info_plus",
+      "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/device_info_plus-11.5.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
+    },
+    {
+      "name": "device_info_plus_platform_interface",
+      "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/device_info_plus_platform_interface-7.0.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
+    },
+    {
       "name": "dio",
       "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/dio-5.9.2",
       "packageUri": "lib/",
@@ -1016,6 +1028,18 @@
       "languageVersion": "3.1"
     },
     {
+      "name": "vibration",
+      "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/vibration-2.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
+      "name": "vibration_platform_interface",
+      "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/vibration_platform_interface-0.0.3",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
       "name": "vm_service",
       "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/vm_service-15.0.2",
       "packageUri": "lib/",
@@ -1050,6 +1074,12 @@
       "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/win32-5.15.0",
       "packageUri": "lib/",
       "languageVersion": "3.8"
+    },
+    {
+      "name": "win32_registry",
+      "rootUri": "file:///Users/jesuscaro/.pub-cache/hosted/pub.dev/win32_registry-2.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
     },
     {
       "name": "wkt_parser",

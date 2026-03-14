@@ -37,16 +37,16 @@ class PlannerScreen extends ConsumerStatefulWidget {
 }
 
 class _PlannerScreenState extends ConsumerState<PlannerScreen> {
-  bool _didInitLocation = false;
+  // Timestamp of the last GPS origin fetch. Allows re-fetching on tab return
+  // (when the user walks and switches back) while avoiding rapid repeated calls.
+  DateTime? _lastGpsInit;
   bool _refreshingNearby = false;
   int? _selectedNearbyRouteId;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_didInitLocation) return;
-    _didInitLocation = true;
-    Future<void>(_setCurrentLocationAsOrigin);
+    _maybeRefreshGpsOrigin();
   }
 
   @override
@@ -54,6 +54,28 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     // Clear active positions when leaving the planner
     ref.read(mapActivePositionsProvider.notifier).state = const <LatLng>[];
     super.dispose();
+  }
+
+  /// Schedules a GPS origin refresh when:
+  /// - No origin is set yet (first load), OR
+  /// - Origin is GPS and ≥60 s have passed since the last fetch (tab return).
+  /// Manual address selections are never overridden.
+  void _maybeRefreshGpsOrigin() {
+    final notifier = ref.read(plannerNotifierProvider.notifier);
+    final origin = notifier.selectedOrigin;
+    final isGpsOrigin =
+        origin == null || origin.displayName == AppStrings.currentLocationLabel;
+    if (!isGpsOrigin) return; // user typed an address — don't touch
+
+    final now = DateTime.now();
+    if (_lastGpsInit != null &&
+        now.difference(_lastGpsInit!) < const Duration(seconds: 60)) {
+      return; // too soon
+    }
+    _lastGpsInit = now;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _setCurrentLocationAsOrigin();
+    });
   }
 
   Future<void> _setCurrentLocationAsOrigin() async {
@@ -120,6 +142,10 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Re-check GPS on every render so tab-switch returns also pick up the
+    // current position. The 60-second throttle inside prevents rapid re-calls.
+    _maybeRefreshGpsOrigin();
+
     final state = ref.watch(plannerNotifierProvider);
     final favoritesAsync = ref.watch(favoritesProvider);
     final notifier = ref.read(plannerNotifierProvider.notifier);

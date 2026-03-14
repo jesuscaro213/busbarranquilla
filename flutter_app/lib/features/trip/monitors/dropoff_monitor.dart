@@ -41,7 +41,7 @@ class DropoffMonitor {
 
     final dist = _routeDistanceMeters(pos.latitude, pos.longitude);
 
-    if (!_prepared && dist <= 400) {
+    if (!_prepared && dist <= 700) {
       _prepared = true;
       onPrepare();
     }

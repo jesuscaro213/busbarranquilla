@@ -84,7 +84,9 @@ abstract final class AppStrings {
   };
 
   static const prepareToAlight = 'Prepárate para bajar';
+  static const prepareToAlightBody = 'Tu parada está a unos 700 m. Ve acercándote a la puerta.';
   static const alightNow = '¡Bájate ya!';
+  static const alightNowBody = 'Tu parada está a menos de 200 m. ¡Es hora de bajar!';
   static const missedStop = 'Pasaste tu parada';
   static const stillOnBus = '¿Sigues en el bus?';
   static const stillOnBusBody = 'Detectamos que llevas mucho tiempo sin moverte. ¿Todavía estás en el bus?';

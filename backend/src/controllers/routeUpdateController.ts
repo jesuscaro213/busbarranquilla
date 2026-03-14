@@ -3,6 +3,11 @@ import pool from '../config/database';
 
 const RUTA_REAL_THRESHOLD = 3; // reportes para activar alerta
 
+// Umbral para rechazar el reporte: si el GPS está a menos de esto de la ruta
+// registrada, consideramos que el bus sigue la ruta y el reporte no aplica.
+// 80 m es coherente con el desvío (100 m) dejando margen de drift GPS urbano.
+const ON_ROUTE_THRESHOLD_METERS = 80;
+
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -12,10 +17,31 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function minDistToGeometryMeters(lat: number, lng: number, geometry: [number,number][]): number {
+// Distancia mínima del punto P al segmento AB (en metros).
+// Usa proyección en espacio de grados (válido para distancias cortas <5 km).
+function distToSegmentMeters(
+  pLat: number, pLng: number,
+  aLat: number, aLng: number,
+  bLat: number, bLng: number,
+): number {
+  const dx = bLat - aLat;
+  const dy = bLng - aLng;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return haversineMeters(pLat, pLng, aLat, aLng);
+  const t = Math.max(0, Math.min(1, ((pLat - aLat) * dx + (pLng - aLng) * dy) / lenSq));
+  return haversineMeters(pLat, pLng, aLat + t * dx, aLng + t * dy);
+}
+
+// Distancia mínima del punto a cualquier segmento de la polilínea.
+// Más precisa que la distancia al vértice más cercano en calles paralelas.
+function minDistToSegmentsMeters(lat: number, lng: number, geometry: [number, number][]): number {
   let min = Infinity;
-  for (const [gLat, gLng] of geometry) {
-    const d = haversineMeters(lat, lng, gLat, gLng);
+  for (let i = 0; i < geometry.length - 1; i++) {
+    const d = distToSegmentMeters(
+      lat, lng,
+      geometry[i][0], geometry[i][1],
+      geometry[i + 1][0], geometry[i + 1][1],
+    );
     if (d < min) min = d;
   }
   return min;
@@ -53,10 +79,11 @@ export const reportRouteUpdate = async (req: Request, res: Response): Promise<vo
       const routeGeometry: [number, number][] | null = routeResult.rows[0]?.geometry ?? null;
 
       if (routeGeometry && routeGeometry.length >= 2) {
-        const distMeters = minDistToGeometryMeters(userLat, userLng, routeGeometry);
-        if (distMeters < 200) {
+        const distMeters = minDistToSegmentsMeters(userLat, userLng, routeGeometry);
+        if (distMeters < ON_ROUTE_THRESHOLD_METERS) {
           res.status(400).json({
             on_route: true,
+            distance_meters: Math.round(distMeters),
             message: 'Estás sobre la ruta registrada, el reporte no aplica',
           });
           return;

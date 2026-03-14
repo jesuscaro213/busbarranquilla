@@ -8,6 +8,7 @@ import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/plan_result.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
+import '../../../core/location/location_service.dart';
 import '../models/nominatim_result.dart';
 import 'planner_state.dart';
 
@@ -89,10 +90,24 @@ class PlannerNotifier extends Notifier<PlannerState> {
     _nearbyRefreshTimer = null;
     if (!_originIsGps) return;
 
-    _nearbyRefreshTimer = Timer.periodic(const Duration(minutes: 2), (_) {
-      final origin = _selectedOrigin;
-      if (origin == null || state is! PlannerIdle) return;
-      unawaited(loadNearbyForOrigin(origin));
+    _nearbyRefreshTimer = Timer.periodic(const Duration(minutes: 2), (_) async {
+      if (state is! PlannerIdle) return;
+
+      // Get fresh GPS position so nearby routes use current location, not the
+      // coordinates captured when the screen first loaded.
+      final pos = await LocationService.getCurrentPosition();
+      if (pos == null) return;
+
+      final updated = NominatimResult(
+        displayName: AppStrings.currentLocationLabel,
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+      _selectedOrigin = updated;
+      if (state is PlannerIdle) {
+        state = (state as PlannerIdle).copyWith(selectedOrigin: updated);
+      }
+      await loadNearbyForOrigin(updated);
     });
   }
 

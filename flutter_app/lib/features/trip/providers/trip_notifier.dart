@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:vibration/vibration.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -20,6 +20,7 @@ import '../../../core/domain/models/stop.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/socket/socket_service.dart';
 import '../monitors/auto_resolve_monitor.dart';
 import '../monitors/desvio_monitor.dart';
@@ -384,7 +385,7 @@ class TripNotifier extends Notifier<TripState> {
         geometry,
       );
 
-      if (dist < 200) {
+      if (dist < 80) {
         _deviationReEntryTimer?.cancel();
         _deviationReEntryTimer = null;
         final routeIdToUpdate = _deviationRouteId;
@@ -506,14 +507,30 @@ class TripNotifier extends Notifier<TripState> {
       onPrepare: () {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.prepare);
+        // Two medium pulses — noticeable but not panic-inducing.
+        unawaited(Vibration.vibrate(
+          pattern: [0, 200, 200, 200],
+          intensities: [0, 180, 0, 180],
+        ));
+        unawaited(NotificationService.showAlert(
+          title: AppStrings.prepareToAlight,
+          body: AppStrings.prepareToAlightBody,
+          payload: 'dropoff_prepare',
+        ));
       },
       onAlight: () {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.alight);
-        // Three heavy pulses so the user clearly feels the "get off now" alert.
-        HapticFeedback.heavyImpact();
-        Future<void>.delayed(const Duration(milliseconds: 350), HapticFeedback.heavyImpact);
-        Future<void>.delayed(const Duration(milliseconds: 700), HapticFeedback.heavyImpact);
+        // Five heavy pulses — urgent "get off now" feel.
+        unawaited(Vibration.vibrate(
+          pattern: [0, 400, 150, 400, 150, 400, 150, 400, 150, 400],
+          intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+        ));
+        unawaited(NotificationService.showAlert(
+          title: AppStrings.alightNow,
+          body: AppStrings.alightNowBody,
+          payload: 'dropoff_alight',
+        ));
       },
       onMissed: () {
         if (state is! TripActive) return;
@@ -743,7 +760,17 @@ class TripNotifier extends Notifier<TripState> {
     _desvioMonitor = DesvioMonitor(
       geometry: activeState.route.geometry,
       stops: activeState.stops,
-      onDesvio: () {
+      onDesvio: () async {
+        // 5 strong pulses: [on, off, on, off, on, off, on, off, on] in ms
+        unawaited(Vibration.vibrate(
+          pattern: [0, 300, 150, 300, 150, 300, 150, 300, 150, 300],
+          intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+        ));
+        unawaited(NotificationService.showAlert(
+          title: AppStrings.desvioTitle,
+          body: AppStrings.desvioBody,
+          payload: 'desvio',
+        ));
         if (state is TripActive) {
           state = (state as TripActive).copyWith(desvioDetected: true);
         }

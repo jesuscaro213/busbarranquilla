@@ -51,8 +51,8 @@ class LocationService {
       return Geolocator.getPositionStream(
         locationSettings: AndroidSettings(
           accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-          intervalDuration: const Duration(seconds: 20),
+          distanceFilter: 5,
+          intervalDuration: const Duration(seconds: 5),
           foregroundNotificationConfig: const ForegroundNotificationConfig(
             notificationTitle: 'MiBus — Viaje activo',
             notificationText: 'Transmitiendo tu ubicación en tiempo real 🚌',

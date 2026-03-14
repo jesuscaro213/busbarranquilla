@@ -712,4 +712,16 @@ busbarranquilla/
 
 ---
 
-*Última actualización: 2026-03-13 (v16)*
+### Flutter — GPS real-time tracking (viaje activo)
+
+**Problema:** `intervalDuration: 20s` en Android hacía que el marcador del bus saltara ~220 m cada 20 segundos en vez de moverse suavemente.
+
+**Fix:** `location_service.dart` — `backgroundPositionStream` en Android:
+- `distanceFilter: 10 → 5` m
+- `intervalDuration: 20s → 5s`
+
+El marcador UI se actualiza en cada fix GPS (sin throttle). El backend sigue con throttle de 28 s para no saturar el servidor. Resultado: movimiento visual fluido cada ~5 s.
+
+---
+
+*Última actualización: 2026-03-14 (v17)*

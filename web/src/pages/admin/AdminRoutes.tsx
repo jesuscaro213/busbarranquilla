@@ -260,6 +260,10 @@ export default function AdminRoutes() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // ── AI description parser ────────────────────────────────────────────────────
+  const [aiParsing, setAiParsing] = useState(false);
+  const [aiResult, setAiResult] = useState<{ labels: string[]; failed: string[] } | null>(null);
+
   // ── Map refs ────────────────────────────────────────────────────────────────
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -457,6 +461,37 @@ export default function AdminRoutes() {
       }
     }
     setStep(2);
+  }
+
+  // ── AI description parser ────────────────────────────────────────────────────
+
+  async function handleParseWithAI() {
+    if (!geocodeText.trim()) return;
+    setAiParsing(true);
+    setAiResult(null);
+    try {
+      const res = await routesApi.parseDescription(geocodeText);
+      const { waypoints, labels, failed } = res.data as {
+        waypoints: [number, number][];
+        labels: string[];
+        failed: string[];
+      };
+      setAiResult({ labels, failed });
+      // Convert waypoints to stops and snap to roads
+      const newStops: Stop[] = waypoints.map((wp, i) => ({
+        id: crypto.randomUUID(),
+        name: labels[i] ?? `Punto ${i + 1}`,
+        lat: wp[0],
+        lng: wp[1],
+      }));
+      setStops(newStops);
+      await snapAndUpdate(waypoints);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Error al interpretar con IA';
+      window.alert(msg);
+    } finally {
+      setAiParsing(false);
+    }
   }
 
   // ── Geocoder (UNTOUCHED) ────────────────────────────────────────────────────
@@ -1472,15 +1507,39 @@ export default function AdminRoutes() {
                         placeholder="Nevada – Granabastos – Avenida Murillo"
                         className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                       />
-                      <button
-                        onClick={handleGeocode}
-                        disabled={geocoding || geocodeText.trim() === ''}
-                        className="mt-2 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium text-sm px-3 py-2 rounded-lg transition-colors"
-                      >
-                        {geocoding
-                          ? `Procesando ${geocodingProgress.current} / ${geocodingProgress.total}…`
-                          : 'Geocodificar'}
-                      </button>
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <button
+                          onClick={handleParseWithAI}
+                          disabled={aiParsing || geocoding || geocodeText.trim() === ''}
+                          className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium text-sm px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                          title="Interpreta texto libre del PDF y extrae el trazado automáticamente"
+                        >
+                          {aiParsing ? '✨ Interpretando…' : '✨ Interpretar con IA'}
+                        </button>
+                        <button
+                          onClick={handleGeocode}
+                          disabled={geocoding || aiParsing || geocodeText.trim() === ''}
+                          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium text-sm px-3 py-2 rounded-lg transition-colors"
+                          title="Geocodifica nombres de paradas separados por guiones"
+                        >
+                          {geocoding
+                            ? `Procesando ${geocodingProgress.current} / ${geocodingProgress.total}…`
+                            : 'Geocodificar paradas'}
+                        </button>
+                      </div>
+                      {aiResult && (
+                        <div className="mt-2 text-xs space-y-1">
+                          <p className="text-green-400">✅ {aiResult.labels.length} intersecciones encontradas</p>
+                          {aiResult.failed.length > 0 && (
+                            <details className="text-amber-400 cursor-pointer">
+                              <summary>⚠️ {aiResult.failed.length} sin geocodificar</summary>
+                              <ul className="mt-1 pl-2 space-y-0.5 text-gray-400">
+                                {aiResult.failed.map((f, i) => <li key={i}>· {f}</li>)}
+                              </ul>
+                            </details>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Stops list */}

@@ -106,6 +106,9 @@ export const routesApi = {
   snapWaypoints: (waypoints: [number, number][]) =>
     api.post('/api/routes/snap-waypoints', { waypoints }),
 
+  parseDescription: (text: string) =>
+    api.post('/api/admin/routes/parse-description', { text }),
+
   scanBlog: (skipManuallyEdited = false) =>
     api.post('/api/admin/routes/scan-blog', { skipManuallyEdited }),
 

@@ -21,6 +21,7 @@ import {
   listBusRoutes,
   getAdminStats,
 } from '../controllers/adminController';
+import { parseRouteDescription } from '../controllers/routeDescriptionController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
 
@@ -40,6 +41,7 @@ router.post('/routes/scan-blog', authMiddleware, requireRole('admin'), scanBlogR
 router.post('/routes/process-imports', authMiddleware, requireRole('admin'), processImportedRoutes);
 router.post('/routes/import-transmetro', authMiddleware, requireRole('admin'), importOSMTransmetro);
 router.post('/routes/import-buses', authMiddleware, requireRole('admin'), importOSMBuses);
+router.post('/routes/parse-description', authMiddleware, requireRole('admin'), parseRouteDescription);
 router.get('/transmetro', authMiddleware, requireRole('admin'), listTransmetroRoutes);
 router.get('/buses', authMiddleware, requireRole('admin'), listBusRoutes);
 router.patch('/routes/:id/toggle-active', authMiddleware, requireRole('admin'), toggleRouteActive);

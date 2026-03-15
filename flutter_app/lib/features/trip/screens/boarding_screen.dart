@@ -145,7 +145,10 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
 
     final filtered = _routes.where((route) {
       final q = _search.toLowerCase();
-      return route.name.toLowerCase().contains(q) || route.code.toLowerCase().contains(q);
+      final company = (route.companyName ?? route.company ?? '').toLowerCase();
+      return route.name.toLowerCase().contains(q) ||
+          route.code.toLowerCase().contains(q) ||
+          company.contains(q);
     }).toList(growable: false);
 
     return Scaffold(

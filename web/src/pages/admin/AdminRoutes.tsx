@@ -200,6 +200,17 @@ export default function AdminRoutes() {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
   const [routesError, setRoutesError] = useState<string | null>(null);
+
+  // ── Search & filter state ────────────────────────────────────────────────────
+  const [search, setSearch] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [filterCompany, setFilterCompany] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'' | 'active' | 'inactive'>('');
+  const [filterProcess, setFilterProcess] = useState<'' | 'pending' | 'done' | 'error' | 'processing'>('');
+  const [filterManual, setFilterManual] = useState<'' | 'manual' | 'auto'>('');
+  const [filterGeometry, setFilterGeometry] = useState<'' | 'yes' | 'no'>('');
+  const [groupByCompany, setGroupByCompany] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [regenToast, setRegenToast] = useState<string | null>(null);
   const [regenLoadingId, setRegenLoadingId] = useState<number | null>(null);
   const [toggleLoadingId, setToggleLoadingId] = useState<number | null>(null);
@@ -1017,6 +1028,119 @@ export default function AdminRoutes() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  // ── RouteRow inner component ────────────────────────────────────────────────
+  function RouteRow({ route, showCompany = false }: { route: Route; showCompany?: boolean }) {
+    return (
+      <tr className="hover:bg-gray-50 transition-colors">
+        <td className="px-4 py-3 font-mono font-semibold text-blue-700">{route.code}</td>
+        <td className="px-4 py-3 text-gray-900">
+          <span className="flex items-center gap-1.5">
+            {route.name}
+            {route.manually_edited_at && (
+              <span
+                title={`Editada manualmente el ${new Date(route.manually_edited_at).toLocaleDateString('es-CO')}`}
+                className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+              >
+                ✏️ manual
+              </span>
+            )}
+          </span>
+        </td>
+        {showCompany && (
+          <td className="px-4 py-3 text-gray-500">{route.company_name ?? route.company ?? '—'}</td>
+        )}
+        <td className="px-4 py-3 text-gray-500">
+          {route.frequency_minutes != null ? `${route.frequency_minutes} min` : '—'}
+        </td>
+        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+          {route.first_departure && route.last_departure ? `${route.first_departure} – ${route.last_departure}` : '—'}
+        </td>
+        <td className="px-4 py-3">
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${route.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+            {route.is_active ? 'Activa' : 'Inactiva'}
+          </span>
+        </td>
+        <td className="px-4 py-3">
+          {route.status === 'pending' && <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Pendiente</span>}
+          {route.status === 'processing' && <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Procesando</span>}
+          {route.status === 'done' && <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Lista</span>}
+          {route.status === 'error' && <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">Error</span>}
+        </td>
+        <td className="px-4 py-3">
+          <div className="relative" ref={openDropdownId === route.id ? dropdownRef : null}>
+            <button
+              onClick={() => setOpenDropdownId(openDropdownId === route.id ? null : route.id)}
+              className="text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-2 py-1 rounded text-base font-bold transition-colors"
+              title="Acciones"
+            >
+              ⋮
+            </button>
+            {openDropdownId === route.id && (
+              <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                <button onClick={() => { openEditModal(route); setOpenDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg transition-colors">
+                  ✏️ Editar
+                </button>
+                <button onClick={() => { handleToggleActive(route.id); setOpenDropdownId(null); }} disabled={toggleLoadingId === route.id} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {route.is_active ? '🔴 Desactivar' : '🟢 Activar'}
+                </button>
+                <button onClick={() => { handleRegenGeometry(route.id); setOpenDropdownId(null); }} disabled={regenLoadingId === route.id} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {regenLoadingId === route.id ? '⏳ Regenerando…' : '🔄 Regenerar geometría'}
+                </button>
+                <hr className="border-gray-100" />
+                <button onClick={() => { handleDeleteRoute(route.id); setOpenDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-b-lg transition-colors">
+                  🗑️ Eliminar
+                </button>
+              </div>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  // ── Derived: filtered routes ────────────────────────────────────────────────
+  const filteredRoutes = routes.filter(r => {
+    const q = search.toLowerCase();
+    if (q && !r.name.toLowerCase().includes(q) && !r.code.toLowerCase().includes(q) && !(r.company_name ?? r.company ?? '').toLowerCase().includes(q)) return false;
+    if (filterCompany && (r.company_name ?? r.company ?? '') !== filterCompany) return false;
+    if (filterStatus === 'active' && !r.is_active) return false;
+    if (filterStatus === 'inactive' && r.is_active) return false;
+    if (filterProcess && r.status !== filterProcess) return false;
+    if (filterManual === 'manual' && !r.manually_edited_at) return false;
+    if (filterManual === 'auto' && r.manually_edited_at) return false;
+    return true;
+  });
+
+  const uniqueCompanies = Array.from(new Set(routes.map(r => r.company_name ?? r.company ?? '—'))).sort();
+
+  // Group by company
+  const grouped: Record<string, Route[]> = {};
+  for (const r of filteredRoutes) {
+    const key = r.company_name ?? r.company ?? '—';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(r);
+  }
+  const groupKeys = Object.keys(grouped).sort();
+
+  const activeFiltersCount = [filterCompany, filterStatus, filterProcess, filterManual, filterGeometry].filter(Boolean).length;
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setSearch('');
+    setFilterCompany('');
+    setFilterStatus('');
+    setFilterProcess('');
+    setFilterManual('');
+    setFilterGeometry('');
+  }
+
   return (
     <div className="p-6">
       {/* Regenerate toast */}
@@ -1109,7 +1233,101 @@ export default function AdminRoutes() {
         </div>
       )}
 
-      {/* Routes table */}
+      {/* ── Search & filters ──────────────────────────────────────────────── */}
+      {!loadingRoutes && !routesError && routes.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {/* Quick search + toggle row */}
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por nombre, código o empresa…"
+                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+              )}
+            </div>
+            <button
+              onClick={() => setShowAdvanced(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition-colors ${showAdvanced ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              ⚙️ Filtros
+              {activeFiltersCount > 0 && (
+                <span className="bg-blue-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{activeFiltersCount}</span>
+              )}
+            </button>
+            <button
+              onClick={() => setGroupByCompany(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition-colors ${groupByCompany ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              title="Agrupar por empresa"
+            >
+              🏢 Agrupar
+            </button>
+          </div>
+
+          {/* Advanced filters panel */}
+          {showAdvanced && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Empresa</label>
+                  <select value={filterCompany} onChange={e => setFilterCompany(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todas</option>
+                    {uniqueCompanies.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Estado</label>
+                  <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as typeof filterStatus)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todos</option>
+                    <option value="active">🟢 Activa</option>
+                    <option value="inactive">⚫ Inactiva</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Proceso</label>
+                  <select value={filterProcess} onChange={e => setFilterProcess(e.target.value as typeof filterProcess)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todos</option>
+                    <option value="pending">🟡 Pendiente</option>
+                    <option value="processing">🔵 Procesando</option>
+                    <option value="done">✅ Lista</option>
+                    <option value="error">🔴 Error</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Edición</label>
+                  <select value={filterManual} onChange={e => setFilterManual(e.target.value as typeof filterManual)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Todas</option>
+                    <option value="manual">✏️ Editadas manualmente</option>
+                    <option value="auto">🤖 Sin edición manual</option>
+                  </select>
+                </div>
+              </div>
+              {activeFiltersCount > 0 && (
+                <button onClick={clearFilters} className="text-xs text-red-600 hover:text-red-800 font-medium">
+                  ✕ Limpiar filtros
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Results count */}
+          <p className="text-xs text-gray-400">
+            {filteredRoutes.length} de {routes.length} rutas
+            {activeFiltersCount > 0 || search ? ' (filtradas)' : ''}
+          </p>
+        </div>
+      )}
+
+      {/* ── Routes table ──────────────────────────────────────────────────── */}
       {loadingRoutes ? (
         <div className="text-center py-16 text-gray-400">Cargando rutas…</div>
       ) : routesError ? (
@@ -1118,7 +1336,61 @@ export default function AdminRoutes() {
         <div className="text-center py-16 text-gray-400">
           No hay rutas registradas. Crea la primera con el botón de arriba.
         </div>
+      ) : filteredRoutes.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <p className="text-3xl mb-2">🔍</p>
+          <p className="font-medium">Sin resultados</p>
+          <p className="text-sm mt-1">Prueba con otros términos o limpia los filtros.</p>
+        </div>
+      ) : groupByCompany ? (
+        /* ── Grouped view ── */
+        <div className="space-y-3">
+          {groupKeys.map(company => {
+            const isCollapsed = collapsedGroups.has(company);
+            const groupRoutes = grouped[company];
+            return (
+              <div key={company} className="border border-gray-200 rounded-xl overflow-hidden">
+                {/* Group header */}
+                <button
+                  onClick={() => toggleGroup(company)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                >
+                  <span className="flex items-center gap-2 font-semibold text-gray-700 text-sm">
+                    🏢 {company}
+                    <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{groupRoutes.length}</span>
+                    <span className="text-xs font-normal text-gray-400">
+                      {groupRoutes.filter(r => r.is_active).length} activas
+                    </span>
+                  </span>
+                  <span className="text-gray-400 text-xs">{isCollapsed ? '▶' : '▼'}</span>
+                </button>
+                {/* Group table */}
+                {!isCollapsed && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-white border-b border-gray-100 text-gray-500 uppercase text-xs tracking-wide">
+                        <tr>
+                          <th className="px-4 py-2 text-left">Código</th>
+                          <th className="px-4 py-2 text-left">Nombre</th>
+                          <th className="px-4 py-2 text-left">Frecuencia</th>
+                          <th className="px-4 py-2 text-left">Horario</th>
+                          <th className="px-4 py-2 text-left">Estado</th>
+                          <th className="px-4 py-2 text-left">Proceso</th>
+                          <th className="px-4 py-2 text-left">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {groupRoutes.map(route => <RouteRow key={route.id} route={route} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
+        /* ── Flat view ── */
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
@@ -1134,106 +1406,7 @@ export default function AdminRoutes() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {routes.map(route => (
-                <tr key={route.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-mono font-semibold text-blue-700">
-                    {route.code}
-                  </td>
-                  <td className="px-4 py-3 text-gray-900">
-                    <span className="flex items-center gap-1.5">
-                      {route.name}
-                      {route.manually_edited_at && (
-                        <span
-                          title={`Editada manualmente el ${new Date(route.manually_edited_at).toLocaleDateString('es-CO')}`}
-                          className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
-                        >
-                          ✏️ manual
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {route.company_name ?? route.company ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {route.frequency_minutes != null
-                      ? `${route.frequency_minutes} min`
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                    {route.first_departure && route.last_departure
-                      ? `${route.first_departure} – ${route.last_departure}`
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        route.is_active
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}
-                    >
-                      {route.is_active ? 'Activa' : 'Inactiva'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {route.status === 'pending' && (
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Pendiente</span>
-                    )}
-                    {route.status === 'processing' && (
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Procesando</span>
-                    )}
-                    {route.status === 'done' && (
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Lista</span>
-                    )}
-                    {route.status === 'error' && (
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">Error</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="relative" ref={openDropdownId === route.id ? dropdownRef : null}>
-                      <button
-                        onClick={() => setOpenDropdownId(openDropdownId === route.id ? null : route.id)}
-                        className="text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-2 py-1 rounded text-base font-bold transition-colors"
-                        title="Acciones"
-                      >
-                        ⋮
-                      </button>
-                      {openDropdownId === route.id && (
-                        <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-                          <button
-                            onClick={() => { openEditModal(route); setOpenDropdownId(null); }}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg transition-colors"
-                          >
-                            ✏️ Editar
-                          </button>
-                          <button
-                            onClick={() => { handleToggleActive(route.id); setOpenDropdownId(null); }}
-                            disabled={toggleLoadingId === route.id}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {route.is_active ? '🔴 Desactivar' : '🟢 Activar'}
-                          </button>
-                          <button
-                            onClick={() => { handleRegenGeometry(route.id); setOpenDropdownId(null); }}
-                            disabled={regenLoadingId === route.id}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {regenLoadingId === route.id ? '⏳ Regenerando…' : '🔄 Regenerar geometría'}
-                          </button>
-                          <hr className="border-gray-100" />
-                          <button
-                            onClick={() => { handleDeleteRoute(route.id); setOpenDropdownId(null); }}
-                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-b-lg transition-colors"
-                          >
-                            🗑️ Eliminar
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filteredRoutes.map(route => <RouteRow key={route.id} route={route} showCompany />)}
             </tbody>
           </table>
         </div>

@@ -438,7 +438,7 @@ export default function AdminRoutes() {
 
     // Si viene desde Alertas con tracks de referencia, abrir editor directamente
     if (autoStartGeomEdit) {
-      const wpts = geom ? extractWaypoints(geom) : [];
+      const wpts = geom ? extractDenseWaypoints(geom) : [];
       setGeomBeforeEdit(geom);
       setWaypoints(wpts);
       waypointsRef.current = wpts;
@@ -600,7 +600,7 @@ export default function AdminRoutes() {
     setDiffOriginalGeometry(origGeom ?? null);
     setGeomBeforeEdit(origGeom ?? null); // cancel in edit mode restores original
     setCustomGeometry(aiDiff.newGeometry);
-    const wpts = extractWaypoints(aiDiff.newGeometry);
+    const wpts = extractDenseWaypoints(aiDiff.newGeometry);
     setWaypoints(wpts);
     waypointsRef.current = wpts;
     setIsEditingGeometry(true);
@@ -681,17 +681,7 @@ export default function AdminRoutes() {
 
   // ── Waypoint helpers ───────────────────────────────────────────────────────
 
-  function extractWaypoints(geometry: [number, number][], targetCount = 12): [number, number][] {
-    if (geometry.length <= targetCount) return [...geometry];
-    const result: [number, number][] = [];
-    const step = (geometry.length - 1) / (targetCount - 1);
-    for (let i = 0; i < targetCount; i++) {
-      result.push(geometry[Math.round(i * step)]);
-    }
-    return result;
-  }
-
-  // Dense waypoints for erase mode — one point every ~spacingM meters (street-level granularity)
+  // Dense waypoints — one point every ~spacingM meters (street-level granularity)
   function extractDenseWaypoints(geometry: [number, number][], spacingM = 150): [number, number][] {
     if (geometry.length <= 2) return [...geometry];
     const result: [number, number][] = [geometry[0]];
@@ -2073,7 +2063,7 @@ export default function AdminRoutes() {
                           <button
                             onClick={() => {
                               setCustomGeometry(osrmGeometry);
-                              const wpts = osrmGeometry ? extractWaypoints(osrmGeometry) : [];
+                              const wpts = osrmGeometry ? extractDenseWaypoints(osrmGeometry) : [];
                               setWaypoints(wpts);
                               waypointsRef.current = wpts;
                             }}
@@ -2089,12 +2079,7 @@ export default function AdminRoutes() {
                               </div>
                               <button
                                 onClick={() => {
-                                  // Restore sparse waypoints for drawing mode
-                                  if (customGeometry && customGeometry.length >= 2) {
-                                    const sparseWpts = extractWaypoints(customGeometry);
-                                    setWaypoints(sparseWpts);
-                                    waypointsRef.current = sparseWpts;
-                                  }
+                                  // Keep current dense waypoints — erase mode already densified them
                                   setIsSegEraseMode(false);
                                   isSegEraseModeRef.current = false;
                                 }}
@@ -2163,7 +2148,7 @@ export default function AdminRoutes() {
                         <button
                           onClick={() => {
                             setGeomBeforeEdit(customGeometry);
-                            const wpts = customGeometry ? extractWaypoints(customGeometry) : [];
+                            const wpts = customGeometry ? extractDenseWaypoints(customGeometry) : [];
                             setWaypoints(wpts);
                             waypointsRef.current = wpts;
                             setIsEditingGeometry(true);
@@ -2232,7 +2217,7 @@ export default function AdminRoutes() {
                               onClick={() => {
                                 setDiffConfirmMode(false);
                                 // Re-enter edit mode with current geometry
-                                const wpts = customGeometry ? extractWaypoints(customGeometry) : [];
+                                const wpts = customGeometry ? extractDenseWaypoints(customGeometry) : [];
                                 setWaypoints(wpts);
                                 waypointsRef.current = wpts;
                                 setIsEditingGeometry(true);

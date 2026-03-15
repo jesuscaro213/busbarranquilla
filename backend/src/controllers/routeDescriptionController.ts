@@ -4,13 +4,10 @@ import axios from 'axios';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const DELAY_MS = 1000; // Nominatim requires ≥1s between requests
-const OVERPASS_CONCURRENCY = 4; // Overpass handles parallel queries fine
 const BQ_BBOX = '10.82,-74.98,11.08,-74.62';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Normalize Colombian street names for Overpass regex matching
-// "Carrera 5" → regex that matches "Carrera 5", "Cra. 5", "CRA 5", "Cr 5", etc.
 function streetRegex(name: string): string {
   return name
     .replace(/^Carrera\s+/i,  '(Carrera|Cra\\.?|CRA|Cr\\.?)\\s*')
@@ -19,15 +16,14 @@ function streetRegex(name: string): string {
     .replace(/^Transversal\s+/i, '(Transversal|Tv\\.?|TV)\\s*')
     .replace(/^Avenida\s+/i,  '(Avenida|Av\\.?|AV)\\s*')
     .replace(/^Vía\s+/i,      '(Vía|Via)\\s*')
-    // append word boundary anchor for the number portion
     + '$';
 }
 
-// Primary: Overpass API — finds the actual intersection node in OSM
+// Overpass: finds the actual OSM intersection node
 async function geocodeViaOverpass(street1: string, street2: string): Promise<[number, number] | null> {
   const r1 = streetRegex(street1);
   const r2 = streetRegex(street2);
-  const query = `[out:json][timeout:20][bbox:${BQ_BBOX}];
+  const query = `[out:json][timeout:5][bbox:${BQ_BBOX}];
 way["name"~"${r1}",i]["highway"]->.s1;
 way["name"~"${r2}",i]["highway"]->.s2;
 node(w.s1)(w.s2);
@@ -37,51 +33,45 @@ out 1;`;
     const res = await axios.post<{ elements: { lat: number; lon: number }[] }>(
       'https://overpass-api.de/api/interpreter',
       query,
-      { headers: { 'Content-Type': 'text/plain' }, timeout: 25000 }
+      { headers: { 'Content-Type': 'text/plain' }, timeout: 6000 }
     );
     if (res.data.elements.length > 0) {
-      const el = res.data.elements[0];
-      return [el.lat, el.lon];
+      return [res.data.elements[0].lat, res.data.elements[0].lon];
     }
   } catch { /* fall through */ }
   return null;
 }
 
-// Fallback: Nominatim with multiple Colombian address formats
+// Nominatim fallback for Overpass misses
 async function geocodeViaNominatim(street1: string, street2: string): Promise<[number, number] | null> {
-  // Extract number from street name (e.g. "Calle 37" → "37", "Calle 26A" → "26A")
   const numMatch = street2.match(/[\dA-Za-z]+$/);
   const num = numMatch ? numMatch[0] : '';
 
-  // Include both Barranquilla and Soledad (buses cross both municipalities)
   const queries = [
     `${street1} #${num}, Barranquilla, Colombia`,
     `${street1} #${num}, Soledad, Colombia`,
-    `${street1} ${num}, Barranquilla, Colombia`,
     `${street1} y ${street2}, Barranquilla, Colombia`,
-    `${street1} y ${street2}, Soledad, Colombia`,
     `${street1}, Barranquilla, Colombia`,
   ];
 
   for (const q of queries) {
     try {
-      await sleep(DELAY_MS);
+      await sleep(1000);
       const res = await axios.get<{ lat: string; lon: string }[]>(
         'https://nominatim.openstreetmap.org/search',
         {
           params: { q, format: 'json', limit: 1, bounded: 1, viewbox: '-74.98,11.08,-74.62,10.82' },
           headers: { 'User-Agent': 'co.mibus.admin/1.0' },
-          timeout: 10000,
+          timeout: 8000,
         }
       );
       if (res.data.length > 0) {
         return [parseFloat(res.data[0].lat), parseFloat(res.data[0].lon)];
       }
-    } catch { /* try next format */ }
+    } catch { /* try next */ }
   }
   return null;
 }
-
 
 export async function parseRouteDescription(req: Request, res: Response): Promise<void> {
   const { text } = req.body as { text?: string };
@@ -95,84 +85,69 @@ export async function parseRouteDescription(req: Request, res: Response): Promis
     return;
   }
 
-  // ── Step 1: Claude extracts intersections ──────────────────────────────────
+  // ── Step 1: Claude extracts 5-8 key turning points only ────────────────────
+  // Fewer points = faster geocoding, OSRM fills the road-following path between them
   let intersections: string[] = [];
   try {
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
+      max_tokens: 512,
       messages: [
         {
           role: 'user',
-          content: `Extrae todas las intersecciones de calles de esta descripción de ruta de bus en Barranquilla, Colombia, en orden de recorrido.
+          content: `Extrae los PUNTOS DE GIRO PRINCIPALES de esta descripción de ruta de bus en Barranquilla, Colombia.
 
-Reglas:
-- Cuando dice "por la Carrera X hasta la Calle Y" → intersección es "Carrera X con Calle Y"
-- Cuando dice "por esta hasta la Carrera X" → intersección es "Calle anterior con Carrera X"
-- Incluye inicio y fin
-- Usa formato exacto: "Carrera 5 con Calle 37" o "Calle 18 con Carrera 40"
-- Responde SOLO con el array JSON, sin texto adicional, sin markdown
+REGLAS ESTRICTAS:
+- Máximo 8 puntos, mínimo 3
+- Solo donde el bus cambia de calle principal (giros reales, no cada intersección)
+- Incluye punto de inicio y punto final
+- Formato exacto: "Carrera 5 con Calle 37"
+- Responde SOLO con el array JSON
 
 Descripción:
 ${text}
 
 Array JSON:`,
         },
-        {
-          role: 'assistant',
-          content: '[',
-        },
+        { role: 'assistant', content: '[' },
       ],
     });
 
     const claudeText = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
-    // Claude continues after the '[' prefill — prepend it back
-    // But handle the case where Claude echoes the '[' itself
     const raw = claudeText.startsWith('[') ? claudeText : '[' + claudeText;
-    // Strip markdown fences if present
     const cleaned = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-    // Extract JSON array — greedy match to capture the full array
     const match = cleaned.match(/\[[\s\S]*\]/);
     if (match) {
       try {
         const parsed = JSON.parse(match[0]) as unknown[];
         intersections = parsed.filter((x): x is string => typeof x === 'string' && x.length > 3);
       } catch {
-        // Try to extract quoted strings manually if JSON is malformed
         const strings = cleaned.match(/"([^"]+)"/g);
         if (strings) intersections = strings.map(s => s.replace(/"/g, '')).filter(s => s.length > 3);
       }
     }
   } catch (err) {
-    res.status(500).json({ error: 'Error al llamar a la IA. Intenta de nuevo.', detail: String(err) });
+    res.status(500).json({ error: 'Error al llamar a la IA.', detail: String(err) });
     return;
   }
 
   if (intersections.length === 0) {
-    res.status(422).json({
-      error: 'La IA no pudo extraer intersecciones del texto.',
-      debug: { intersections },
-    });
+    res.status(422).json({ error: 'La IA no pudo extraer puntos de la descripción.' });
     return;
   }
 
-  // ── Step 2: Geocode each intersection ──────────────────────────────────────
-  // Phase A: run Overpass in parallel batches (fast, accurate)
+  // ── Step 2: Geocode anchor points — ALL in parallel via Overpass (~2s total) ──
   const parts = intersections.map(i => {
     const p = i.split(/\s+con\s+/i);
     return p.length === 2 ? [p[0].trim(), p[1].trim()] as [string, string] : null;
   });
 
-  const overpassResults: ([number, number] | null)[] = new Array(intersections.length).fill(null);
-  for (let i = 0; i < intersections.length; i += OVERPASS_CONCURRENCY) {
-    const batch = parts.slice(i, i + OVERPASS_CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map(p => p ? geocodeViaOverpass(p[0], p[1]) : Promise.resolve(null))
-    );
-    batchResults.forEach((r, j) => { overpassResults[i + j] = r; });
-  }
+  // All Overpass queries fire simultaneously
+  const overpassResults = await Promise.all(
+    parts.map(p => p ? geocodeViaOverpass(p[0], p[1]) : Promise.resolve(null))
+  );
 
-  // Phase B: for Overpass misses, fallback to Nominatim sequentially (rate-limited)
+  // Nominatim fallback for misses (sequential, rate-limited, only for few failures)
   const waypoints: [number, number][] = [];
   const labels: string[] = [];
   const failed: string[] = [];
@@ -180,7 +155,6 @@ Array JSON:`,
   for (let i = 0; i < intersections.length; i++) {
     let coords = overpassResults[i];
     if (!coords && parts[i]) {
-      await sleep(DELAY_MS);
       coords = await geocodeViaNominatim(parts[i]![0], parts[i]![1]);
     }
     if (coords) {
@@ -193,12 +167,14 @@ Array JSON:`,
 
   if (waypoints.length < 2) {
     res.status(422).json({
-      error: 'No se pudieron geocodificar suficientes intersecciones.',
+      error: 'No se pudieron geocodificar suficientes puntos.',
       intersections,
       failed,
     });
     return;
   }
 
+  // Return anchor waypoints — frontend calls OSRM snap to get full road-following geometry
+  // and computes spatial diff vs existing route geometry
   res.json({ waypoints, labels, failed, total: intersections.length });
 }

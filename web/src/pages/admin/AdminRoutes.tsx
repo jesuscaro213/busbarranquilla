@@ -263,14 +263,16 @@ export default function AdminRoutes() {
   // ── AI description parser ────────────────────────────────────────────────────
   const [aiParsing, setAiParsing] = useState(false);
   const [aiResult, setAiResult] = useState<{ labels: string[]; failed: string[] } | null>(null);
-  // Pending diff: shown when AI result differs from existing geometry; user must confirm or discard
   const [aiDiff, setAiDiff] = useState<{
-    newWaypoints: [number, number][];
-    newGeometry: [number, number][];
+    newWaypoints: [number, number][];   // anchor points from Claude/Overpass
+    newGeometry: [number, number][];    // full OSRM road-following geometry
     newStops: Stop[];
     labels: string[];
     failed: string[];
-    changedCount: number;
+    // Spatial diff segments: consecutive points classified as same/changed vs existing geometry
+    segments: { type: 'same' | 'changed'; points: [number, number][] }[];
+    changedSegments: number;
+    sameSegments: number;
   } | null>(null);
 
   // ── Map refs ────────────────────────────────────────────────────────────────
@@ -482,15 +484,41 @@ export default function AdminRoutes() {
     const R = 6371000;
     const dLat = (b[0] - a[0]) * Math.PI / 180;
     const dLng = (b[1] - a[1]) * Math.PI / 180;
-    const sinDLat = Math.sin(dLat / 2);
-    const sinDLng = Math.sin(dLng / 2);
-    const x = sinDLat * sinDLat + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * sinDLng * sinDLng;
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
   }
 
-  // Min distance from point to a polyline (existing geometry)
-  function minDistToPolyline(point: [number, number], geom: [number, number][]): number {
-    return geom.reduce((min, gp) => Math.min(min, haversineM(point, gp)), Infinity);
+  // Spatial diff: classify each point in newGeom as 'same' or 'changed' vs existingGeom
+  // Returns consecutive segments grouped by type
+  function computeSpatialDiff(
+    newGeom: [number, number][],
+    existingGeom: [number, number][],
+    thresholdM = 200
+  ): { type: 'same' | 'changed'; points: [number, number][] }[] {
+    if (!existingGeom.length) return [{ type: 'changed', points: newGeom }];
+
+    // Classify each point in the new geometry
+    const types = newGeom.map(np => {
+      const minDist = existingGeom.reduce((min, ep) => Math.min(min, haversineM(np, ep)), Infinity);
+      return minDist <= thresholdM ? 'same' : 'changed';
+    });
+
+    // Group consecutive points into segments, overlapping by 1 point for visual continuity
+    const segments: { type: 'same' | 'changed'; points: [number, number][] }[] = [];
+    let curType = types[0] as 'same' | 'changed';
+    let curPts: [number, number][] = [newGeom[0]];
+
+    for (let i = 1; i < newGeom.length; i++) {
+      if (types[i] === curType) {
+        curPts.push(newGeom[i]);
+      } else {
+        segments.push({ type: curType, points: curPts });
+        curType = types[i] as 'same' | 'changed';
+        curPts = [newGeom[i - 1], newGeom[i]]; // overlap 1 point so segments connect
+      }
+    }
+    segments.push({ type: curType, points: curPts });
+    return segments;
   }
 
   async function handleParseWithAI() {
@@ -499,40 +527,41 @@ export default function AdminRoutes() {
     setAiResult(null);
     setAiDiff(null);
     try {
+      // Step 1: Claude extracts 5-8 key anchor points, Overpass geocodes them (~3s)
       const res = await routesApi.parseDescription(geocodeText);
-      const { waypoints: newWps, labels, failed } = res.data as {
+      const { waypoints: anchorWps, labels, failed } = res.data as {
         waypoints: [number, number][];
         labels: string[];
         failed: string[];
       };
 
-      // Snap to roads first
-      let snapped: [number, number][] = newWps;
+      // Step 2: OSRM generates full road-following geometry from anchor points
+      let fullGeometry: [number, number][] = anchorWps;
       try {
-        const snapRes = await routesApi.snapWaypoints(newWps);
-        snapped = snapRes.data.geometry as [number, number][];
-      } catch { /* use raw waypoints */ }
+        const snapRes = await routesApi.snapWaypoints(anchorWps);
+        fullGeometry = snapRes.data.geometry as [number, number][];
+      } catch { /* use raw anchor points if OSRM unavailable */ }
 
-      const newStops: Stop[] = newWps.map((wp, i) => ({
+      const newStops: Stop[] = anchorWps.map((wp, i) => ({
         id: crypto.randomUUID(),
         name: labels[i] ?? `Punto ${i + 1}`,
         lat: wp[0],
         lng: wp[1],
       }));
 
-      // If editing an existing route with geometry → show diff first
+      setAiResult({ labels, failed });
+
       const existingGeom = customGeometry ?? osrmGeometry;
       if (editingRoute && existingGeom && existingGeom.length >= 2) {
-        // Count waypoints that moved more than 300 m from existing route
-        const CHANGE_THRESHOLD_M = 300;
-        const changedCount = newWps.filter(wp => minDistToPolyline(wp, existingGeom) > CHANGE_THRESHOLD_M).length;
-        setAiResult({ labels, failed });
-        setAiDiff({ newWaypoints: newWps, newGeometry: snapped, newStops, labels, failed, changedCount });
+        // Step 3: Spatial diff — compare new OSRM geometry vs existing geometry point by point
+        const segments = computeSpatialDiff(fullGeometry, existingGeom, 200);
+        const changedSegments = segments.filter(s => s.type === 'changed').length;
+        const sameSegments = segments.filter(s => s.type === 'same').length;
+        setAiDiff({ newWaypoints: anchorWps, newGeometry: fullGeometry, newStops, labels, failed, segments, changedSegments, sameSegments });
       } else {
         // No existing geometry — apply immediately
-        setAiResult({ labels, failed });
         setStops(newStops);
-        setCustomGeometry(snapped);
+        setCustomGeometry(fullGeometry);
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Error al interpretar con IA';
@@ -859,7 +888,6 @@ export default function AdminRoutes() {
 
   useEffect(() => {
     const map = mapRef.current;
-    // Always clear diff layers first
     diffLayersRef.current.forEach(l => l.remove());
     diffLayersRef.current = [];
 
@@ -867,46 +895,39 @@ export default function AdminRoutes() {
 
     const existingGeom = customGeometry ?? osrmGeometry;
 
-    // Existing route: blue dashed polyline (dimmed)
+    // 1. Existing route: thin gray dashed — shows what's being replaced
     if (existingGeom && existingGeom.length >= 2) {
-      const existing = L.polyline(
+      const layer = L.polyline(
         existingGeom.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-        { color: '#60A5FA', weight: 4, opacity: 0.5, dashArray: '10,6' }
-      ).bindTooltip('Trazado actual', { sticky: true }).addTo(map);
-      diffLayersRef.current.push(existing);
+        { color: '#94A3B8', weight: 3, opacity: 0.6, dashArray: '8,5' }
+      ).bindTooltip('Trazado actual (guardado)', { sticky: true }).addTo(map);
+      diffLayersRef.current.push(layer);
     }
 
-    // New AI route: green solid polyline
-    if (aiDiff.newGeometry.length >= 2) {
-      const newLine = L.polyline(
-        aiDiff.newGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-        { color: '#22C55E', weight: 4, opacity: 0.9 }
-      ).bindTooltip('Nuevo trazado (IA)', { sticky: true }).addTo(map);
-      diffLayersRef.current.push(newLine);
-    }
+    // 2. New geometry colored by segment:
+    //    blue  = follows same streets as before (unchanged)
+    //    green = new/different streets
+    aiDiff.segments.forEach(seg => {
+      if (seg.points.length < 2) return;
+      const color = seg.type === 'same' ? '#3B82F6' : '#22C55E';
+      const tooltip = seg.type === 'same' ? 'Sin cambios' : '¡Tramo nuevo!';
+      const layer = L.polyline(
+        seg.points.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color, weight: 5, opacity: 0.95 }
+      ).bindTooltip(tooltip, { sticky: true }).addTo(map);
+      diffLayersRef.current.push(layer);
+    });
 
-    // Waypoints: green = unchanged (<300 m), red = changed (≥300 m)
-    const CHANGE_THRESHOLD_M = 300;
+    // 3. Anchor points from Claude (the 5-8 key turning points)
     aiDiff.newWaypoints.forEach((wp, i) => {
-      const dist = existingGeom ? existingGeom.reduce((min, gp) => {
-        const R = 6371000;
-        const dLat = (gp[0] - wp[0]) * Math.PI / 180;
-        const dLng = (gp[1] - wp[1]) * Math.PI / 180;
-        const a = Math.sin(dLat/2)**2 + Math.cos(wp[0]*Math.PI/180)*Math.cos(gp[0]*Math.PI/180)*Math.sin(dLng/2)**2;
-        return Math.min(min, R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
-      }, Infinity) : 0;
-      const changed = dist > CHANGE_THRESHOLD_M;
       const circle = L.circleMarker([wp[0], wp[1]], {
-        radius: 7,
-        color: 'white',
-        weight: 2,
-        fillColor: changed ? '#EF4444' : '#22C55E',
-        fillOpacity: 1,
-      }).bindTooltip(`${i + 1}. ${aiDiff.labels[i] ?? ''}${changed ? ` · movido ~${Math.round(dist)}m` : ''}`, { sticky: true }).addTo(map);
+        radius: 6, color: 'white', weight: 2,
+        fillColor: '#F59E0B', fillOpacity: 1,
+      }).bindTooltip(`${i + 1}. ${aiDiff.labels[i] ?? ''}`, { sticky: true }).addTo(map);
       diffLayersRef.current.push(circle);
     });
 
-    // Fit map to new geometry bounds
+    // Fit map to full new geometry
     if (aiDiff.newGeometry.length >= 2) {
       const bounds = L.latLngBounds(aiDiff.newGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple));
       map.fitBounds(bounds, { padding: [40, 40] });
@@ -1651,38 +1672,47 @@ export default function AdminRoutes() {
                       {aiDiff ? (
                         <div className="mt-3 rounded-lg border border-purple-700 bg-purple-900/30 p-3 text-xs space-y-2">
                           <p className="font-semibold text-purple-200 flex items-center gap-1.5">
-                            <span>✨</span>
-                            <span>Comparación con trazado actual</span>
+                            ✨ Comparación por calles
                           </p>
-                          <div className="flex gap-3 text-xs">
-                            <span className="flex items-center gap-1"><span className="inline-block w-3 h-1 bg-blue-400 opacity-60 rounded" style={{borderTop:'2px dashed #60A5FA',background:'none'}}></span> Actual</span>
-                            <span className="flex items-center gap-1"><span className="inline-block w-3 h-1 bg-green-400 rounded"></span> Nuevo (IA)</span>
-                            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span> Movido</span>
+                          {/* Legend */}
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block w-4 h-1 rounded" style={{ background: '#94A3B8' }}></span>
+                              Actual
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block w-4 h-1.5 rounded bg-blue-500"></span>
+                              Sin cambios
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block w-4 h-1.5 rounded bg-green-500"></span>
+                              Tramo nuevo
+                            </span>
                           </div>
-                          {aiDiff.changedCount === 0 ? (
-                            <p className="text-green-400">✅ El trazado coincide con el actual — sin diferencias</p>
+                          {/* Summary */}
+                          {aiDiff.changedSegments === 0 ? (
+                            <p className="text-green-400">✅ El recorrido es igual al actual</p>
                           ) : (
-                            <p className="text-amber-300">⚠️ {aiDiff.changedCount} de {aiDiff.newWaypoints.length} intersecciones se movieron más de 300 m</p>
+                            <p className="text-amber-300">
+                              ⚠️ {aiDiff.changedSegments} tramo{aiDiff.changedSegments > 1 ? 's' : ''} nuevo{aiDiff.changedSegments > 1 ? 's' : ''} · {aiDiff.sameSegments} sin cambios
+                            </p>
                           )}
+                          <p className="text-gray-400">{aiDiff.newWaypoints.length} puntos clave · ruta por calles vía OSRM</p>
                           {aiDiff.failed.length > 0 && (
                             <details className="text-amber-400 cursor-pointer">
-                              <summary>⚠️ {aiDiff.failed.length} sin geocodificar</summary>
+                              <summary>⚠️ {aiDiff.failed.length} puntos sin geocodificar</summary>
                               <ul className="mt-1 pl-2 space-y-0.5 text-gray-400">
                                 {aiDiff.failed.map((f, i) => <li key={i}>· {f}</li>)}
                               </ul>
                             </details>
                           )}
                           <div className="flex gap-2 pt-1">
-                            <button
-                              onClick={applyAiDiff}
-                              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium text-xs px-2 py-1.5 rounded-lg transition-colors"
-                            >
-                              ✅ Aplicar correcciones
+                            <button onClick={applyAiDiff}
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium text-xs px-2 py-1.5 rounded-lg transition-colors">
+                              ✅ Aplicar
                             </button>
-                            <button
-                              onClick={discardAiDiff}
-                              className="flex-1 bg-gray-600 hover:bg-gray-500 text-gray-200 font-medium text-xs px-2 py-1.5 rounded-lg transition-colors"
-                            >
+                            <button onClick={discardAiDiff}
+                              className="flex-1 bg-gray-600 hover:bg-gray-500 text-gray-200 font-medium text-xs px-2 py-1.5 rounded-lg transition-colors">
                               ❌ Descartar
                             </button>
                           </div>

@@ -38,6 +38,26 @@
 - Botón desaparece si ya confirmó o llegó al límite de 3
 - Contador de créditos de confirmación ganados en el viaje
 
+## AdminRoutes — Editor de trazado: herramienta borrador (2026-03-15)
+
+### Estados y refs añadidos
+- `isEraserMode` / `isEraserModeRef` — controlan si el modo borrador está activo
+- `eraserPoints` / `eraserPointsRef` — puntos trazados en el mapa como camino de borrado
+- `eraserPolylineRef` / `eraserMarkersRef` — capas Leaflet del camino borrador
+
+### Flujo de la herramienta borrador
+1. Botón `🧹 Borrador` aparece en la sección "Trazado" cuando `isEditingGeometry = true`
+2. Al activar: cursor = crosshair, banner informativo con contador de puntos
+3. Clicks en mapa añaden puntos al path del borrador (dibujado en rojo punteado)
+4. `applyEraser()`: filtra waypoints dentro de 300 m del path → llama `snapAndUpdate(remaining)`
+5. Si quedan < 2 waypoints → `window.alert(...)` y aborta
+6. Al confirmar o cancelar: `isEraserMode = false`, `eraserPoints = []`
+
+### TS issue resuelto: aiDiff posiblemente null dentro de función anidada
+- `revertSegment()` vive dentro de un `useEffect` donde `aiDiff` ya fue verificado como no-null
+- TypeScript no estrecha el tipo dentro de funciones anidadas → solución: `const currentAiDiff = aiDiff;` antes de definir la función
+- `setAiDiff` en `revertSegment` usa campos explícitos (`newWaypoints`, `newStops`, `labels`, `failed`) en vez de spread para garantizar todos los campos requeridos
+
 ## Archivos clave modificados (esta sesión)
 - `backend/src/index.ts` — socket rooms
 - `backend/src/config/schema.ts` — report_confirmations + credits_awarded_to_reporter

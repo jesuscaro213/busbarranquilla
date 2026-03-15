@@ -279,6 +279,12 @@ export default function AdminRoutes() {
   const [diffOriginalGeometry, setDiffOriginalGeometry] = useState<[number, number][] | null>(null);
   const [diffConfirmMode, setDiffConfirmMode] = useState(false);
 
+  // ── Eraser tool ──────────────────────────────────────────────────────────────
+  const [isEraserMode, setIsEraserMode] = useState(false);
+  const [eraserPoints, setEraserPoints] = useState<[number, number][]>([]);
+  const isEraserModeRef = useRef(false);
+  const eraserPointsRef = useRef<[number, number][]>([]);
+
   // ── Map refs ────────────────────────────────────────────────────────────────
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -292,6 +298,8 @@ export default function AdminRoutes() {
   const refTrackLayersRef = useRef<L.Polyline[]>([]); // tracks de referencia GPS de reportantes
   const diffLayersRef = useRef<(L.Polyline | L.CircleMarker)[]>([]); // diff comparison overlay
   const origGeomLayerRef = useRef<L.Polyline | null>(null); // reference underlay during adjust/confirm
+  const eraserPolylineRef = useRef<L.Polyline | null>(null);
+  const eraserMarkersRef = useRef<L.CircleMarker[]>([]);
   const autoOpenHandledRef = useRef(false); // evita re-abrir al recargar rutas
   const [refTracks, setRefTracks] = useState<{ user_name: string; geometry: [number, number][] }[]>([]);
   const [showRefTracks, setShowRefTracks] = useState(true);
@@ -461,6 +469,10 @@ export default function AdminRoutes() {
     setAiResult(null);
     setDiffOriginalGeometry(null);
     setDiffConfirmMode(false);
+    setIsEraserMode(false);
+    isEraserModeRef.current = false;
+    setEraserPoints([]);
+    eraserPointsRef.current = [];
     sessionStorage.removeItem('admin_route_ref_tracks');
   }
 
@@ -599,6 +611,38 @@ export default function AdminRoutes() {
     setAiResult(null);
   }
 
+  function applyEraser() {
+    const pts = eraserPointsRef.current;
+    if (pts.length < 2) return;
+    const ERASE_RADIUS_M = 300;
+    const currentWps = waypointsRef.current ?? [];
+
+    const remaining = currentWps.filter(wp => {
+      const minDist = pts.reduce((min, ep) => {
+        const R = 6371000;
+        const dLat = (ep[0] - wp[0]) * Math.PI / 180;
+        const dLng = (ep[1] - wp[1]) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(wp[0]*Math.PI/180)*Math.cos(ep[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+        return Math.min(min, R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+      }, Infinity);
+      return minDist > ERASE_RADIUS_M;
+    }) as [number, number][];
+
+    if (remaining.length < 2) {
+      window.alert('El borrador eliminaría demasiados puntos. Traza un área más pequeña.');
+      return;
+    }
+
+    setWaypoints(remaining);
+    waypointsRef.current = remaining;
+    snapAndUpdate(remaining);
+
+    setIsEraserMode(false);
+    isEraserModeRef.current = false;
+    setEraserPoints([]);
+    eraserPointsRef.current = [];
+  }
+
   // ── Geocoder (UNTOUCHED) ────────────────────────────────────────────────────
 
   async function handleGeocode() {
@@ -729,6 +773,11 @@ export default function AdminRoutes() {
             )
           );
           setLocatingStop(null);
+        } else if (isEraserModeRef.current) {
+          // Eraser mode — build freehand path
+          const newPt: [number, number] = [e.latlng.lat, e.latlng.lng];
+          eraserPointsRef.current = [...eraserPointsRef.current, newPt];
+          setEraserPoints([...eraserPointsRef.current]);
         } else if (isEditingGeometryRef.current) {
           // Geometry edit mode — add waypoint and snap to roads
           const newWpt: [number, number] = [e.latlng.lat, e.latlng.lng];
@@ -772,6 +821,8 @@ export default function AdminRoutes() {
       diffLayersRef.current.forEach(l => l.remove());
       diffLayersRef.current = [];
       if (origGeomLayerRef.current) { origGeomLayerRef.current.remove(); origGeomLayerRef.current = null; }
+      if (eraserPolylineRef.current) { eraserPolylineRef.current.remove(); eraserPolylineRef.current = null; }
+      eraserMarkersRef.current.forEach(m => m.remove()); eraserMarkersRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -786,10 +837,12 @@ export default function AdminRoutes() {
     if (!map) return;
     map.getContainer().style.cursor = locatingStop
       ? 'crosshair'
+      : isEraserMode
+      ? 'crosshair'
       : isEditingGeometry
       ? 'cell'
       : '';
-  }, [locatingStop, isEditingGeometry]);
+  }, [locatingStop, isEditingGeometry, isEraserMode]);
 
   // ── ESC cancels locate mode ────────────────────────────────────────────────
 
@@ -910,6 +963,7 @@ export default function AdminRoutes() {
 
     if (!map || !mapReady || !aiDiff) return;
 
+    const currentAiDiff = aiDiff;
     const existingGeom = customGeometry ?? osrmGeometry;
 
     // 1. Existing route: thin gray dashed — shows what's being replaced
@@ -921,17 +975,89 @@ export default function AdminRoutes() {
       diffLayersRef.current.push(layer);
     }
 
+    // Local helper: revert one changed segment back to original geometry
+    function revertSegment(segIdx: number) {
+      if (!existingGeom) return;
+      const seg = currentAiDiff.segments[segIdx];
+      const segStart = seg.points[0];
+      const segEnd = seg.points[seg.points.length - 1];
+      const newGeom = currentAiDiff.newGeometry;
+
+      // Find nearest indices in newGeom
+      let startIdx = 0, endIdx = 0, minS = Infinity, minE = Infinity;
+      newGeom.forEach((p, i) => {
+        const R = 6371000;
+        const dS = (() => { const dLat=(p[0]-segStart[0])*Math.PI/180; const dLng=(p[1]-segStart[1])*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(segStart[0]*Math.PI/180)*Math.cos(p[0]*Math.PI/180)*Math.sin(dLng/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); })();
+        const dE = (() => { const dLat=(p[0]-segEnd[0])*Math.PI/180; const dLng=(p[1]-segEnd[1])*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(segEnd[0]*Math.PI/180)*Math.cos(p[0]*Math.PI/180)*Math.sin(dLng/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); })();
+        if (dS < minS) { minS = dS; startIdx = i; }
+        if (dE < minE) { minE = dE; endIdx = i; }
+      });
+
+      // Find nearest indices in existingGeom
+      let origS = 0, origE = 0, minOS = Infinity, minOE = Infinity;
+      existingGeom.forEach((p, i) => {
+        const R = 6371000;
+        const dS = (() => { const dLat=(p[0]-segStart[0])*Math.PI/180; const dLng=(p[1]-segStart[1])*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(segStart[0]*Math.PI/180)*Math.cos(p[0]*Math.PI/180)*Math.sin(dLng/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); })();
+        const dE = (() => { const dLat=(p[0]-segEnd[0])*Math.PI/180; const dLng=(p[1]-segEnd[1])*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(segEnd[0]*Math.PI/180)*Math.cos(p[0]*Math.PI/180)*Math.sin(dLng/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); })();
+        if (dS < minOS) { minOS = dS; origS = i; }
+        if (dE < minOE) { minOE = dE; origE = i; }
+      });
+
+      const s1 = Math.min(origS, origE), s2 = Math.max(origS, origE);
+      const si = Math.min(startIdx, endIdx), ei = Math.max(startIdx, endIdx);
+      const spliced: [number, number][] = [
+        ...newGeom.slice(0, si),
+        ...existingGeom.slice(s1, s2 + 1),
+        ...newGeom.slice(ei + 1),
+      ];
+      if (spliced.length < 2) return;
+
+      const THRESHOLD = 200;
+      const types = spliced.map(np => {
+        const minDist = existingGeom.reduce((min, ep) => {
+          const R = 6371000;
+          const dLat=(ep[0]-np[0])*Math.PI/180; const dLng=(ep[1]-np[1])*Math.PI/180;
+          const a=Math.sin(dLat/2)**2+Math.cos(np[0]*Math.PI/180)*Math.cos(ep[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+          return Math.min(min, R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+        }, Infinity);
+        return minDist <= THRESHOLD ? 'same' : 'changed';
+      });
+      const segments: { type: 'same' | 'changed'; points: [number, number][] }[] = [];
+      let curType = types[0] as 'same' | 'changed', curPts: [number, number][] = [spliced[0]];
+      for (let i = 1; i < spliced.length; i++) {
+        if (types[i] === curType) { curPts.push(spliced[i]); }
+        else { segments.push({ type: curType, points: curPts }); curType = types[i] as 'same' | 'changed'; curPts = [spliced[i-1], spliced[i]]; }
+      }
+      segments.push({ type: curType, points: curPts });
+
+      setAiDiff({
+        newWaypoints: currentAiDiff.newWaypoints,
+        newStops: currentAiDiff.newStops,
+        labels: currentAiDiff.labels,
+        failed: currentAiDiff.failed,
+        newGeometry: spliced,
+        segments,
+        changedSegments: segments.filter(s => s.type === 'changed').length,
+        sameSegments: segments.filter(s => s.type === 'same').length,
+      });
+    }
+
     // 2. New geometry colored by segment:
     //    blue  = follows same streets as before (unchanged)
-    //    green = new/different streets
-    aiDiff.segments.forEach(seg => {
+    //    green = new/different streets — click to revert to original
+    aiDiff.segments.forEach((seg, segIdx) => {
       if (seg.points.length < 2) return;
-      const color = seg.type === 'same' ? '#3B82F6' : '#22C55E';
-      const tooltip = seg.type === 'same' ? 'Sin cambios' : '¡Tramo nuevo!';
+      const isChanged = seg.type === 'changed';
+      const color = isChanged ? '#22C55E' : '#3B82F6';
+      const tooltip = isChanged ? '🟢 Tramo nuevo — click para revertir al original' : 'Sin cambios';
       const layer = L.polyline(
         seg.points.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-        { color, weight: 5, opacity: 0.95 }
-      ).bindTooltip(tooltip, { sticky: true }).addTo(map);
+        { color, weight: isChanged ? 6 : 5, opacity: 0.95 }
+      ).bindTooltip(tooltip, { sticky: true });
+      if (isChanged) {
+        layer.on('click', (e: L.LeafletMouseEvent) => { L.DomEvent.stopPropagation(e); revertSegment(segIdx); });
+      }
+      layer.addTo(map);
       diffLayersRef.current.push(layer);
     });
 
@@ -950,6 +1076,28 @@ export default function AdminRoutes() {
       map.fitBounds(bounds, { padding: [40, 40] });
     }
   }, [aiDiff, mapReady, customGeometry, osrmGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Render eraser path on map ─────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (eraserPolylineRef.current) { eraserPolylineRef.current.remove(); eraserPolylineRef.current = null; }
+    eraserMarkersRef.current.forEach(m => m.remove()); eraserMarkersRef.current = [];
+    if (!map || !mapReady || !isEraserMode || eraserPoints.length === 0) return;
+
+    if (eraserPoints.length >= 2) {
+      eraserPolylineRef.current = L.polyline(
+        eraserPoints.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color: '#EF4444', weight: 4, opacity: 0.85, dashArray: '6,4' }
+      ).addTo(map);
+    }
+    eraserPoints.forEach(([lat, lng]) => {
+      const m = L.circleMarker([lat, lng], {
+        radius: 5, color: '#EF4444', weight: 2, fillColor: '#FCA5A5', fillOpacity: 1,
+      }).addTo(map);
+      eraserMarkersRef.current.push(m);
+    });
+  }, [eraserPoints, mapReady, isEraserMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reference geometry underlay (during diff-adjust and confirm) ───────────
 
@@ -1898,11 +2046,49 @@ export default function AdminRoutes() {
                               setWaypoints(wpts);
                               waypointsRef.current = wpts;
                             }}
-                            disabled={snapping}
+                            disabled={snapping || isEraserMode}
                             className="w-full text-xs bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-gray-200 font-medium px-3 py-2 rounded-lg transition-colors"
                           >
                             🔄 Resetear a OSRM
                           </button>
+                          {isEraserMode ? (
+                            <div className="space-y-1.5">
+                              <div className="text-xs text-red-300 bg-red-900/30 border border-red-800/50 px-2 py-1.5 rounded-lg leading-snug">
+                                🧹 Haz click en el mapa para marcar el tramo a borrar · <strong>{eraserPoints.length}</strong> punto{eraserPoints.length !== 1 ? 's' : ''}
+                              </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={applyEraser}
+                                  disabled={eraserPoints.length < 2 || snapping}
+                                  className="flex-1 text-xs bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium px-2 py-1.5 rounded-lg transition-colors"
+                                >
+                                  ✓ Borrar tramo
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setIsEraserMode(false);
+                                    isEraserModeRef.current = false;
+                                    setEraserPoints([]);
+                                    eraserPointsRef.current = [];
+                                  }}
+                                  className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium px-2 py-1.5 rounded-lg transition-colors"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setIsEraserMode(true);
+                                isEraserModeRef.current = true;
+                              }}
+                              disabled={snapping}
+                              className="w-full text-xs bg-red-900/40 hover:bg-red-800/60 disabled:opacity-50 text-red-300 font-medium px-3 py-2 rounded-lg transition-colors border border-red-800/40"
+                            >
+                              🧹 Borrador — eliminar tramo
+                            </button>
+                          )}
                           {diffOriginalGeometry && (
                             <button
                               onClick={() => {

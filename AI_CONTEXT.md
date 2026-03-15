@@ -820,4 +820,21 @@ Cuando el usuario está en `BoardingScreen` y toca `RoutePreviewSheet`, puede el
 
 ---
 
-*Última actualización: 2026-03-14 (v21)*
+### Web Admin — Editor de trazado (AdminRoutes.tsx)
+
+**Herramienta borrador (eraser tool) — añadida 2026-03-15:**
+- Botón `🧹 Borrador — eliminar tramo` visible solo en modo `isEditingGeometry`
+- Al activarlo: `isEraserMode = true`, cursor cambia a crosshair
+- Clicks en el mapa añaden puntos a `eraserPointsRef` y se dibujan como polilínea roja punteada con círculos
+- `applyEraser()`: filtra waypoints dentro de `ERASE_RADIUS_M = 300` m de cualquier punto de la ruta trazada → llama `snapAndUpdate(remaining)` con los puntos restantes; aborta si quedarían < 2 puntos
+- UI en modo borrador: contador de puntos, botón `✓ Borrar tramo` (disabled si < 2 pts) y botón `Cancelar`
+- El borrador queda anulado (estado limpiado) al cerrar el modal (`closeModal`) y al cancelar
+
+**Revert de segmento en diff de IA — añadido 2026-03-15:**
+- Los segmentos verdes (nuevos) del diff de IA ahora tienen tooltip `🟢 Tramo nuevo — click para revertir al original`
+- Al hacer click en un segmento verde → `revertSegment(segIdx)`: reemplaza ese tramo en la nueva geometría con el fragmento correspondiente de la geometría original, recalcula los segmentos y actualiza el estado `aiDiff`
+- Implementado como función local dentro del `useEffect` del diff overlay; usa `currentAiDiff` (const local) para evitar error TS18047 de posible null
+
+---
+
+*Última actualización: 2026-03-15 (v22)*

@@ -19,7 +19,7 @@ function streetRegex(name: string): string {
     + '$';
 }
 
-// Overpass: finds the actual OSM intersection node
+// Overpass: finds the actual OSM intersection node (city hint in comment only — bbox covers full metro)
 async function geocodeViaOverpass(street1: string, street2: string): Promise<[number, number] | null> {
   const r1 = streetRegex(street1);
   const r2 = streetRegex(street2);
@@ -42,16 +42,44 @@ out 1;`;
   return null;
 }
 
-// Nominatim fallback for Overpass misses
-async function geocodeViaNominatim(street1: string, street2: string): Promise<[number, number] | null> {
+// Google Maps geocoding — uses city hint, validates result inside BQ metro bbox
+async function geocodeViaGoogle(intersection: string, city: string): Promise<[number, number] | null> {
+  const key = process.env.VITE_GOOGLE_MAPS_KEY;
+  if (!key) return null;
+  const queries = [
+    `${intersection}, ${city}, Colombia`,
+    `${intersection}, Barranquilla, Colombia`,
+  ];
+  for (const q of queries) {
+    try {
+      const res = await axios.get(
+        'https://maps.googleapis.com/maps/api/geocode/json',
+        { params: { address: q, key, region: 'co' }, timeout: 5000 }
+      );
+      const results = (res.data as any).results as { geometry: { location: { lat: number; lng: number } } }[];
+      if (results?.length > 0) {
+        const { lat, lng } = results[0].geometry.location;
+        // Validate in BQ metro area bbox
+        if (lat > 10.7 && lat < 11.2 && lng > -75.1 && lng < -74.5) {
+          return [lat, lng];
+        }
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// Nominatim fallback — accepts city param and uses it in queries
+async function geocodeViaNominatim(street1: string, street2: string, city = 'Barranquilla'): Promise<[number, number] | null> {
   const numMatch = street2.match(/[\dA-Za-z]+$/);
   const num = numMatch ? numMatch[0] : '';
 
   const queries = [
-    `${street1} #${num}, Barranquilla, Colombia`,
-    `${street1} #${num}, Soledad, Colombia`,
-    `${street1} y ${street2}, Barranquilla, Colombia`,
-    `${street1}, Barranquilla, Colombia`,
+    `${street1} con ${street2}, ${city}, Colombia`,
+    `${street1} #${num}, ${city}, Colombia`,
+    `${street1} y ${street2}, ${city}, Colombia`,
+    `${street1} con ${street2}, Barranquilla, Colombia`,
+    `${street1}, ${city}, Colombia`,
   ];
 
   for (const q of queries) {
@@ -101,7 +129,8 @@ REGLAS ESTRICTAS:
 - Máximo 8 puntos, mínimo 3
 - Solo donde el bus cambia de calle o avenida principal (giros reales, no cada intersección)
 - Incluye punto de inicio y punto final
-- Formato exacto: "Carrera 5 con Calle 37" — usa el nombre real de la calle según el municipio donde esté
+- Formato exacto: "Carrera 5 con Calle 37, Barranquilla" — usa el nombre real de la calle según el municipio donde esté
+- Agrega el municipio al final de cada punto: "Carrera 5 con Calle 37, Barranquilla" o "Carrera 15 con Calle 30, Soledad"
 - NO corrijas ni normalices nombres de calles de Soledad a Barranquilla — mantenlos como aparecen
 - Responde SOLO con el array JSON
 
@@ -137,26 +166,47 @@ Array JSON:`,
     return;
   }
 
-  // ── Step 2: Geocode anchor points — ALL in parallel via Overpass (~2s total) ──
+  // ── Step 2: Parse intersections — split city from intersection string ──────
+  // Each string is "Carrera X con Calle Y, Municipality" (Claude adds city suffix)
   const parts = intersections.map(i => {
-    const p = i.split(/\s+con\s+/i);
-    return p.length === 2 ? [p[0].trim(), p[1].trim()] as [string, string] : null;
+    const commaIdx = i.lastIndexOf(', ');
+    const city = commaIdx >= 0 ? i.slice(commaIdx + 2) : 'Barranquilla';
+    const intersection = commaIdx >= 0 ? i.slice(0, commaIdx) : i;
+    const p = intersection.split(/\s+con\s+/i);
+    return p.length === 2
+      ? { street1: p[0].trim(), street2: p[1].trim(), city, label: i }
+      : null;
   });
 
-  // All Overpass queries fire simultaneously
+  // ── Step 3: All Overpass queries fire simultaneously (~2s total) ───────────
   const overpassResults = await Promise.all(
-    parts.map(p => p ? geocodeViaOverpass(p[0], p[1]) : Promise.resolve(null))
+    parts.map(p => p ? geocodeViaOverpass(p.street1, p.street2) : Promise.resolve(null))
   );
 
-  // Nominatim fallback for misses (sequential, rate-limited, only for few failures)
+  // ── Step 4: Google Maps for Overpass misses (parallel) ────────────────────
+  const googleNeeded = parts.map((p, i) => (!overpassResults[i] && p ? i : -1)).filter(i => i >= 0);
+  const googleResults: ([number, number] | null)[] = new Array(parts.length).fill(null);
+  if (googleNeeded.length > 0) {
+    const googleBatch = await Promise.all(
+      googleNeeded.map(i => {
+        const p = parts[i]!;
+        return geocodeViaGoogle(`${p.street1} con ${p.street2}`, p.city);
+      })
+    );
+    googleNeeded.forEach((idx, bi) => {
+      googleResults[idx] = googleBatch[bi];
+    });
+  }
+
+  // ── Step 5: Nominatim for remaining misses (sequential, rate-limited) ─────
   const waypoints: [number, number][] = [];
   const labels: string[] = [];
   const failed: string[] = [];
 
   for (let i = 0; i < intersections.length; i++) {
-    let coords = overpassResults[i];
+    let coords = overpassResults[i] ?? googleResults[i];
     if (!coords && parts[i]) {
-      coords = await geocodeViaNominatim(parts[i]![0], parts[i]![1]);
+      coords = await geocodeViaNominatim(parts[i]!.street1, parts[i]!.street2, parts[i]!.city);
     }
     if (coords) {
       waypoints.push(coords);

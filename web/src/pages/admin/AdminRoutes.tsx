@@ -279,11 +279,10 @@ export default function AdminRoutes() {
   const [diffOriginalGeometry, setDiffOriginalGeometry] = useState<[number, number][] | null>(null);
   const [diffConfirmMode, setDiffConfirmMode] = useState(false);
 
-  // ── Eraser tool ──────────────────────────────────────────────────────────────
-  const [isEraserMode, setIsEraserMode] = useState(false);
-  const [eraserPoints, setEraserPoints] = useState<[number, number][]>([]);
-  const isEraserModeRef = useRef(false);
-  const eraserPointsRef = useRef<[number, number][]>([]);
+  // ── Segment erase tool ───────────────────────────────────────────────────────
+  const [isSegEraseMode, setIsSegEraseMode] = useState(false);
+  const isSegEraseModeRef = useRef(false);
+  const segEraseLayersRef = useRef<L.Polyline[]>([]);
 
   // ── Map refs ────────────────────────────────────────────────────────────────
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -298,8 +297,6 @@ export default function AdminRoutes() {
   const refTrackLayersRef = useRef<L.Polyline[]>([]); // tracks de referencia GPS de reportantes
   const diffLayersRef = useRef<(L.Polyline | L.CircleMarker)[]>([]); // diff comparison overlay
   const origGeomLayerRef = useRef<L.Polyline | null>(null); // reference underlay during adjust/confirm
-  const eraserPolylineRef = useRef<L.Polyline | null>(null);
-  const eraserMarkersRef = useRef<L.CircleMarker[]>([]);
   const autoOpenHandledRef = useRef(false); // evita re-abrir al recargar rutas
   const [refTracks, setRefTracks] = useState<{ user_name: string; geometry: [number, number][] }[]>([]);
   const [showRefTracks, setShowRefTracks] = useState(true);
@@ -469,10 +466,8 @@ export default function AdminRoutes() {
     setAiResult(null);
     setDiffOriginalGeometry(null);
     setDiffConfirmMode(false);
-    setIsEraserMode(false);
-    isEraserModeRef.current = false;
-    setEraserPoints([]);
-    eraserPointsRef.current = [];
+    setIsSegEraseMode(false);
+    isSegEraseModeRef.current = false;
     sessionStorage.removeItem('admin_route_ref_tracks');
   }
 
@@ -611,38 +606,6 @@ export default function AdminRoutes() {
     setAiResult(null);
   }
 
-  function applyEraser() {
-    const pts = eraserPointsRef.current;
-    if (pts.length < 2) return;
-    const ERASE_RADIUS_M = 300;
-    const currentWps = waypointsRef.current ?? [];
-
-    const remaining = currentWps.filter(wp => {
-      const minDist = pts.reduce((min, ep) => {
-        const R = 6371000;
-        const dLat = (ep[0] - wp[0]) * Math.PI / 180;
-        const dLng = (ep[1] - wp[1]) * Math.PI / 180;
-        const a = Math.sin(dLat/2)**2 + Math.cos(wp[0]*Math.PI/180)*Math.cos(ep[0]*Math.PI/180)*Math.sin(dLng/2)**2;
-        return Math.min(min, R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
-      }, Infinity);
-      return minDist > ERASE_RADIUS_M;
-    }) as [number, number][];
-
-    if (remaining.length < 2) {
-      window.alert('El borrador eliminaría demasiados puntos. Traza un área más pequeña.');
-      return;
-    }
-
-    setWaypoints(remaining);
-    waypointsRef.current = remaining;
-    snapAndUpdate(remaining);
-
-    setIsEraserMode(false);
-    isEraserModeRef.current = false;
-    setEraserPoints([]);
-    eraserPointsRef.current = [];
-  }
-
   // ── Geocoder (UNTOUCHED) ────────────────────────────────────────────────────
 
   async function handleGeocode() {
@@ -773,12 +736,7 @@ export default function AdminRoutes() {
             )
           );
           setLocatingStop(null);
-        } else if (isEraserModeRef.current) {
-          // Eraser mode — build freehand path
-          const newPt: [number, number] = [e.latlng.lat, e.latlng.lng];
-          eraserPointsRef.current = [...eraserPointsRef.current, newPt];
-          setEraserPoints([...eraserPointsRef.current]);
-        } else if (isEditingGeometryRef.current) {
+        } else if (isEditingGeometryRef.current && !isSegEraseModeRef.current) {
           // Geometry edit mode — add waypoint and snap to roads
           const newWpt: [number, number] = [e.latlng.lat, e.latlng.lng];
           const newWaypoints = [...(waypointsRef.current ?? []), newWpt];
@@ -821,8 +779,8 @@ export default function AdminRoutes() {
       diffLayersRef.current.forEach(l => l.remove());
       diffLayersRef.current = [];
       if (origGeomLayerRef.current) { origGeomLayerRef.current.remove(); origGeomLayerRef.current = null; }
-      if (eraserPolylineRef.current) { eraserPolylineRef.current.remove(); eraserPolylineRef.current = null; }
-      eraserMarkersRef.current.forEach(m => m.remove()); eraserMarkersRef.current = [];
+      segEraseLayersRef.current.forEach(l => l.remove());
+      segEraseLayersRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -837,12 +795,12 @@ export default function AdminRoutes() {
     if (!map) return;
     map.getContainer().style.cursor = locatingStop
       ? 'crosshair'
-      : isEraserMode
-      ? 'crosshair'
+      : isSegEraseMode
+      ? 'pointer'
       : isEditingGeometry
-      ? 'cell'
+      ? 'crosshair'
       : '';
-  }, [locatingStop, isEditingGeometry, isEraserMode]);
+  }, [locatingStop, isEditingGeometry, isSegEraseMode]);
 
   // ── ESC cancels locate mode ────────────────────────────────────────────────
 
@@ -1077,27 +1035,77 @@ export default function AdminRoutes() {
     }
   }, [aiDiff, mapReady, customGeometry, osrmGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Render eraser path on map ─────────────────────────────────────────────
+  // ── Render segment erase overlays ─────────────────────────────────────────
 
   useEffect(() => {
     const map = mapRef.current;
-    if (eraserPolylineRef.current) { eraserPolylineRef.current.remove(); eraserPolylineRef.current = null; }
-    eraserMarkersRef.current.forEach(m => m.remove()); eraserMarkersRef.current = [];
-    if (!map || !mapReady || !isEraserMode || eraserPoints.length === 0) return;
+    segEraseLayersRef.current.forEach(l => l.remove());
+    segEraseLayersRef.current = [];
 
-    if (eraserPoints.length >= 2) {
-      eraserPolylineRef.current = L.polyline(
-        eraserPoints.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-        { color: '#EF4444', weight: 4, opacity: 0.85, dashArray: '6,4' }
-      ).addTo(map);
+    if (!map || !mapReady || !isSegEraseMode || !waypoints || waypoints.length < 2 || !customGeometry || customGeometry.length < 2) return;
+
+    // Find nearest index in geometry for each waypoint
+    function nearestIdx(geom: [number, number][], pt: [number, number]): number {
+      let minD = Infinity, idx = 0;
+      const R = 6371000;
+      for (let i = 0; i < geom.length; i++) {
+        const dLat = (geom[i][0] - pt[0]) * Math.PI / 180;
+        const dLng = (geom[i][1] - pt[1]) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(pt[0] * Math.PI / 180) * Math.cos(geom[i][0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+        const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        if (d < minD) { minD = d; idx = i; }
+      }
+      return idx;
     }
-    eraserPoints.forEach(([lat, lng]) => {
-      const m = L.circleMarker([lat, lng], {
-        radius: 5, color: '#EF4444', weight: 2, fillColor: '#FCA5A5', fillOpacity: 1,
-      }).addTo(map);
-      eraserMarkersRef.current.push(m);
-    });
-  }, [eraserPoints, mapReady, isEraserMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const wptIndices = waypoints.map(wp => nearestIdx(customGeometry, wp));
+
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const startIdx = Math.min(wptIndices[i], wptIndices[i + 1]);
+      const endIdx = Math.max(wptIndices[i], wptIndices[i + 1]);
+      const segPts = customGeometry.slice(startIdx, endIdx + 1);
+      if (segPts.length < 2) continue;
+
+      const segI = i; // capture for closure
+      const layer = L.polyline(
+        segPts.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color: '#3B82F6', weight: 10, opacity: 0.0 }
+      );
+
+      layer.on('mouseover', () => {
+        layer.setStyle({ color: '#EF4444', opacity: 0.65 });
+        layer.bindTooltip('🗑️ Click para borrar este tramo', { sticky: true, direction: 'top' }).openTooltip();
+      });
+
+      layer.on('mouseout', () => {
+        layer.setStyle({ color: '#3B82F6', opacity: 0.0 });
+      });
+
+      layer.on('click', (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        const current = waypointsRef.current ?? [];
+        if (current.length <= 2) {
+          window.alert('No se puede borrar más. La ruta necesita al menos 2 puntos.');
+          return;
+        }
+        // Remove the two waypoints of this segment, unless they're the overall first or last
+        const newWpts = current.filter((_, idx) => {
+          const isFirst = idx === 0;
+          const isLast = idx === current.length - 1;
+          if (idx === segI && !isFirst) return false;
+          if (idx === segI + 1 && !isLast) return false;
+          return true;
+        }) as [number, number][];
+        if (newWpts.length < 2) return;
+        setWaypoints(newWpts);
+        waypointsRef.current = newWpts;
+        snapAndUpdate(newWpts);
+      });
+
+      layer.addTo(map);
+      segEraseLayersRef.current.push(layer);
+    }
+  }, [isSegEraseMode, waypoints, customGeometry, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reference geometry underlay (during diff-adjust and confirm) ───────────
 
@@ -2021,7 +2029,7 @@ export default function AdminRoutes() {
                           <p className="text-xs text-gray-400 mb-2 leading-tight">
                             {snapping
                               ? '⏳ Calculando ruta por calles…'
-                              : `${waypoints?.length ?? 0} puntos naranjas · arrastra para seguir calles · clic en mapa para añadir · clic en punto para eliminar`
+                              : `✏️ Clic en el mapa para dibujar el recorrido · ${waypoints?.length ?? 0} punto${waypoints?.length !== 1 ? 's' : ''} · arrastra para mover · clic en punto para eliminar`
                             }
                           </p>
                           {refTracks.length > 0 && (
@@ -2046,47 +2054,36 @@ export default function AdminRoutes() {
                               setWaypoints(wpts);
                               waypointsRef.current = wpts;
                             }}
-                            disabled={snapping || isEraserMode}
+                            disabled={snapping || isSegEraseMode}
                             className="w-full text-xs bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-gray-200 font-medium px-3 py-2 rounded-lg transition-colors"
                           >
                             🔄 Resetear a OSRM
                           </button>
-                          {isEraserMode ? (
+                          {isSegEraseMode ? (
                             <div className="space-y-1.5">
-                              <div className="text-xs text-red-300 bg-red-900/30 border border-red-800/50 px-2 py-1.5 rounded-lg leading-snug">
-                                🧹 Haz click en el mapa para marcar el tramo a borrar · <strong>{eraserPoints.length}</strong> punto{eraserPoints.length !== 1 ? 's' : ''}
+                              <div className="text-xs text-red-300 bg-red-900/30 border border-red-800/50 px-2 py-2 rounded-lg leading-snug">
+                                🗑️ Pasa el cursor por un tramo de la ruta — se pondrá rojo. <strong>Haz clic para borrarlo.</strong>
                               </div>
-                              <div className="flex gap-1.5">
-                                <button
-                                  onClick={applyEraser}
-                                  disabled={eraserPoints.length < 2 || snapping}
-                                  className="flex-1 text-xs bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium px-2 py-1.5 rounded-lg transition-colors"
-                                >
-                                  ✓ Borrar tramo
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setIsEraserMode(false);
-                                    isEraserModeRef.current = false;
-                                    setEraserPoints([]);
-                                    eraserPointsRef.current = [];
-                                  }}
-                                  className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium px-2 py-1.5 rounded-lg transition-colors"
-                                >
-                                  Cancelar
-                                </button>
-                              </div>
+                              <button
+                                onClick={() => {
+                                  setIsSegEraseMode(false);
+                                  isSegEraseModeRef.current = false;
+                                }}
+                                className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium px-3 py-2 rounded-lg transition-colors"
+                              >
+                                ← Volver a dibujar
+                              </button>
                             </div>
                           ) : (
                             <button
                               onClick={() => {
-                                setIsEraserMode(true);
-                                isEraserModeRef.current = true;
+                                setIsSegEraseMode(true);
+                                isSegEraseModeRef.current = true;
                               }}
-                              disabled={snapping}
+                              disabled={snapping || !waypoints || waypoints.length < 2}
                               className="w-full text-xs bg-red-900/40 hover:bg-red-800/60 disabled:opacity-50 text-red-300 font-medium px-3 py-2 rounded-lg transition-colors border border-red-800/40"
                             >
-                              🧹 Borrador — eliminar tramo
+                              🗑️ Borrar tramo — clic en la ruta
                             </button>
                           )}
                           {diffOriginalGeometry && (
@@ -2096,6 +2093,8 @@ export default function AdminRoutes() {
                                 isEditingGeometryRef.current = false;
                                 setWaypoints(null);
                                 waypointsRef.current = null;
+                                setIsSegEraseMode(false);
+                                isSegEraseModeRef.current = false;
                                 setDiffConfirmMode(true);
                                 // Fit map to show both routes
                                 const map = mapRef.current;
@@ -2117,6 +2116,8 @@ export default function AdminRoutes() {
                               setWaypoints(null);
                               waypointsRef.current = null;
                               setDiffOriginalGeometry(null);
+                              setIsSegEraseMode(false);
+                              isSegEraseModeRef.current = false;
                             }}
                             className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-400 font-medium px-3 py-2 rounded-lg transition-colors"
                           >

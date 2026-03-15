@@ -1097,22 +1097,33 @@ export default function AdminRoutes() {
       layer.on('click', (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
         const current = waypointsRef.current ?? [];
-        if (current.length <= 2) {
-          window.alert('No se puede borrar más. La ruta necesita al menos 2 puntos.');
-          return;
-        }
-        // Remove the two waypoints of this segment, unless they're the overall first or last
+        if (current.length <= 2) return;
+
+        // Find geometry indices for this segment's endpoints
+        const gStart = nearestIdx(customGeometry, current[segI]);
+        const gEnd   = nearestIdx(customGeometry, current[segI + 1]);
+        const lo = Math.min(gStart, gEnd);
+        const hi = Math.max(gStart, gEnd);
+
+        // Slice out the erased segment directly — NO OSRM rerouting
+        const newGeom: [number, number][] = [
+          ...customGeometry.slice(0, lo + 1),  // keep up to segment start
+          ...customGeometry.slice(hi),          // jump past erased segment
+        ];
+
+        // Remove the interior waypoints (keep absolute first and last)
         const newWpts = current.filter((_, idx) => {
           const isFirst = idx === 0;
-          const isLast = idx === current.length - 1;
-          if (idx === segI && !isFirst) return false;
-          if (idx === segI + 1 && !isLast) return false;
+          const isLast  = idx === current.length - 1;
+          if (idx === segI     && !isFirst) return false;
+          if (idx === segI + 1 && !isLast)  return false;
           return true;
         }) as [number, number][];
-        if (newWpts.length < 2) return;
+
+        if (newWpts.length < 2 || newGeom.length < 2) return;
         setWaypoints(newWpts);
         waypointsRef.current = newWpts;
-        snapAndUpdate(newWpts);
+        setCustomGeometry(newGeom); // direct update — user reconnects manually
       });
 
       layer.addTo(map);

@@ -542,13 +542,8 @@ export default function AdminRoutes() {
         fullGeometry = snapRes.data.geometry as [number, number][];
       } catch { /* use raw anchor points if OSRM unavailable */ }
 
-      const newStops: Stop[] = anchorWps.map((wp, i) => ({
-        id: crypto.randomUUID(),
-        name: labels[i] ?? `Punto ${i + 1}`,
-        lat: wp[0],
-        lng: wp[1],
-      }));
-
+      // Anchor points are geometry control points only — NOT bus stops
+      // Bus stops are managed separately (DB-loaded or manually added on map)
       setAiResult({ labels, failed });
 
       const existingGeom = customGeometry ?? osrmGeometry;
@@ -557,10 +552,9 @@ export default function AdminRoutes() {
         const segments = computeSpatialDiff(fullGeometry, existingGeom, 200);
         const changedSegments = segments.filter(s => s.type === 'changed').length;
         const sameSegments = segments.filter(s => s.type === 'same').length;
-        setAiDiff({ newWaypoints: anchorWps, newGeometry: fullGeometry, newStops, labels, failed, segments, changedSegments, sameSegments });
+        setAiDiff({ newWaypoints: anchorWps, newGeometry: fullGeometry, newStops: [], labels, failed, segments, changedSegments, sameSegments });
       } else {
-        // No existing geometry — apply immediately
-        setStops(newStops);
+        // No existing geometry — apply geometry only, keep existing stops untouched
         setCustomGeometry(fullGeometry);
       }
     } catch (err: unknown) {
@@ -573,7 +567,7 @@ export default function AdminRoutes() {
 
   function applyAiDiff() {
     if (!aiDiff) return;
-    setStops(aiDiff.newStops);
+    // Apply new geometry only — stops are managed separately, not replaced by AI anchor points
     setCustomGeometry(aiDiff.newGeometry);
     setAiDiff(null);
   }
@@ -1732,14 +1726,41 @@ export default function AdminRoutes() {
                       )}
                     </div>
 
-                    {/* Stops list */}
+                    {/* AI anchor points timeline — shown only while diff is active */}
+                    {aiDiff && (
+                      <div className="px-4 pb-3 border-b border-gray-700 shrink-0">
+                        <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
+                          Puntos de giro detectados
+                        </p>
+                        <ol className="relative border-l border-gray-600 ml-2 space-y-0">
+                          {aiDiff.labels.map((label, i) => (
+                            <li key={i} className="pl-4 pb-3 last:pb-0">
+                              <span className="absolute -left-1.5 mt-0.5 w-3 h-3 rounded-full border-2 border-amber-400 bg-gray-900 block" />
+                              <span className="text-xs text-gray-200 leading-snug">{label}</span>
+                            </li>
+                          ))}
+                          {aiDiff.failed.length > 0 && aiDiff.failed.map((f, i) => (
+                            <li key={`f${i}`} className="pl-4 pb-3 last:pb-0">
+                              <span className="absolute -left-1.5 mt-0.5 w-3 h-3 rounded-full border-2 border-red-500 bg-gray-900 block" />
+                              <span className="text-xs text-red-400 line-through leading-snug">{f}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+
+                    {/* Stops list — hidden while diff is active */}
                     <div className="flex-1 overflow-y-auto p-4">
                       <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
                         Paradas ({stops.length})
                       </p>
                       {stops.length === 0 ? (
                         <p className="text-gray-500 text-sm text-center py-8 leading-relaxed">
-                          Pega un recorrido arriba o haz click en el mapa
+                          {aiDiff ? 'Confirma o descarta el nuevo trazado para editar paradas' : 'Pega un recorrido arriba o haz click en el mapa'}
+                        </p>
+                      ) : aiDiff ? (
+                        <p className="text-gray-500 text-sm text-center py-4 leading-relaxed">
+                          Las {stops.length} paradas existentes se mantienen — solo cambia el trazado
                         </p>
                       ) : (
                         <ul className="space-y-1.5">
@@ -1793,6 +1814,7 @@ export default function AdminRoutes() {
                     </div>
 
                     {/* ── Geometry section ──────────────────────────────── */}
+
                     <div className="p-4 border-t border-gray-700 shrink-0">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">

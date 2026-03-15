@@ -95,13 +95,14 @@ export async function parseRouteDescription(req: Request, res: Response): Promis
       messages: [
         {
           role: 'user',
-          content: `Extrae los PUNTOS DE GIRO PRINCIPALES de esta descripción de ruta de bus en Barranquilla, Colombia.
+          content: `Extrae los PUNTOS DE GIRO PRINCIPALES de esta descripción de ruta de bus en el Área Metropolitana de Barranquilla, Colombia (puede incluir Barranquilla, Soledad, Malambo o Puerto Colombia).
 
 REGLAS ESTRICTAS:
 - Máximo 8 puntos, mínimo 3
-- Solo donde el bus cambia de calle principal (giros reales, no cada intersección)
+- Solo donde el bus cambia de calle o avenida principal (giros reales, no cada intersección)
 - Incluye punto de inicio y punto final
-- Formato exacto: "Carrera 5 con Calle 37"
+- Formato exacto: "Carrera 5 con Calle 37" — usa el nombre real de la calle según el municipio donde esté
+- NO corrijas ni normalices nombres de calles de Soledad a Barranquilla — mantenlos como aparecen
 - Responde SOLO con el array JSON
 
 Descripción:

@@ -52,10 +52,13 @@ async function geocodeViaNominatim(street1: string, street2: string): Promise<[n
   const numMatch = street2.match(/[\dA-Za-z]+$/);
   const num = numMatch ? numMatch[0] : '';
 
+  // Include both Barranquilla and Soledad (buses cross both municipalities)
   const queries = [
     `${street1} #${num}, Barranquilla, Colombia`,
+    `${street1} #${num}, Soledad, Colombia`,
     `${street1} ${num}, Barranquilla, Colombia`,
     `${street1} y ${street2}, Barranquilla, Colombia`,
+    `${street1} y ${street2}, Soledad, Colombia`,
     `${street1}, Barranquilla, Colombia`,
   ];
 

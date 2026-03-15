@@ -263,6 +263,15 @@ export default function AdminRoutes() {
   // ── AI description parser ────────────────────────────────────────────────────
   const [aiParsing, setAiParsing] = useState(false);
   const [aiResult, setAiResult] = useState<{ labels: string[]; failed: string[] } | null>(null);
+  // Pending diff: shown when AI result differs from existing geometry; user must confirm or discard
+  const [aiDiff, setAiDiff] = useState<{
+    newWaypoints: [number, number][];
+    newGeometry: [number, number][];
+    newStops: Stop[];
+    labels: string[];
+    failed: string[];
+    changedCount: number;
+  } | null>(null);
 
   // ── Map refs ────────────────────────────────────────────────────────────────
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -275,6 +284,7 @@ export default function AdminRoutes() {
   const isEditingGeometryRef = useRef(false);
   const waypointsRef = useRef<[number, number][] | null>(null);
   const refTrackLayersRef = useRef<L.Polyline[]>([]); // tracks de referencia GPS de reportantes
+  const diffLayersRef = useRef<(L.Polyline | L.CircleMarker)[]>([]); // diff comparison overlay
   const autoOpenHandledRef = useRef(false); // evita re-abrir al recargar rutas
   const [refTracks, setRefTracks] = useState<{ user_name: string; geometry: [number, number][] }[]>([]);
   const [showRefTracks, setShowRefTracks] = useState(true);
@@ -440,6 +450,8 @@ export default function AdminRoutes() {
     setIsEditingGeometry(false);
     setGeomBeforeEdit(null);
     setRefTracks([]);
+    setAiDiff(null);
+    setAiResult(null);
     sessionStorage.removeItem('admin_route_ref_tracks');
   }
 
@@ -465,33 +477,81 @@ export default function AdminRoutes() {
 
   // ── AI description parser ────────────────────────────────────────────────────
 
+  // Haversine distance in meters between two lat/lng points
+  function haversineM(a: [number, number], b: [number, number]): number {
+    const R = 6371000;
+    const dLat = (b[0] - a[0]) * Math.PI / 180;
+    const dLng = (b[1] - a[1]) * Math.PI / 180;
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLng = Math.sin(dLng / 2);
+    const x = sinDLat * sinDLat + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * sinDLng * sinDLng;
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }
+
+  // Min distance from point to a polyline (existing geometry)
+  function minDistToPolyline(point: [number, number], geom: [number, number][]): number {
+    return geom.reduce((min, gp) => Math.min(min, haversineM(point, gp)), Infinity);
+  }
+
   async function handleParseWithAI() {
     if (!geocodeText.trim()) return;
     setAiParsing(true);
     setAiResult(null);
+    setAiDiff(null);
     try {
       const res = await routesApi.parseDescription(geocodeText);
-      const { waypoints, labels, failed } = res.data as {
+      const { waypoints: newWps, labels, failed } = res.data as {
         waypoints: [number, number][];
         labels: string[];
         failed: string[];
       };
-      setAiResult({ labels, failed });
-      // Convert waypoints to stops and snap to roads
-      const newStops: Stop[] = waypoints.map((wp, i) => ({
+
+      // Snap to roads first
+      let snapped: [number, number][] = newWps;
+      try {
+        const snapRes = await routesApi.snapWaypoints(newWps);
+        snapped = snapRes.data.geometry as [number, number][];
+      } catch { /* use raw waypoints */ }
+
+      const newStops: Stop[] = newWps.map((wp, i) => ({
         id: crypto.randomUUID(),
         name: labels[i] ?? `Punto ${i + 1}`,
         lat: wp[0],
         lng: wp[1],
       }));
-      setStops(newStops);
-      await snapAndUpdate(waypoints);
+
+      // If editing an existing route with geometry → show diff first
+      const existingGeom = customGeometry ?? osrmGeometry;
+      if (editingRoute && existingGeom && existingGeom.length >= 2) {
+        // Count waypoints that moved more than 300 m from existing route
+        const CHANGE_THRESHOLD_M = 300;
+        const changedCount = newWps.filter(wp => minDistToPolyline(wp, existingGeom) > CHANGE_THRESHOLD_M).length;
+        setAiResult({ labels, failed });
+        setAiDiff({ newWaypoints: newWps, newGeometry: snapped, newStops, labels, failed, changedCount });
+      } else {
+        // No existing geometry — apply immediately
+        setAiResult({ labels, failed });
+        setStops(newStops);
+        setCustomGeometry(snapped);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Error al interpretar con IA';
       window.alert(msg);
     } finally {
       setAiParsing(false);
     }
+  }
+
+  function applyAiDiff() {
+    if (!aiDiff) return;
+    setStops(aiDiff.newStops);
+    setCustomGeometry(aiDiff.newGeometry);
+    setAiDiff(null);
+  }
+
+  function discardAiDiff() {
+    setAiDiff(null);
+    setAiResult(null);
   }
 
   // ── Geocoder (UNTOUCHED) ────────────────────────────────────────────────────
@@ -664,6 +724,8 @@ export default function AdminRoutes() {
         geomPolylineRef.current.remove();
         geomPolylineRef.current = null;
       }
+      diffLayersRef.current.forEach(l => l.remove());
+      diffLayersRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -792,6 +854,64 @@ export default function AdminRoutes() {
       refTrackLayersRef.current.push(layer);
     });
   }, [isEditingGeometry, mapReady, refTracks, showRefTracks]);
+
+  // ── Render AI diff overlay ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    const map = mapRef.current;
+    // Always clear diff layers first
+    diffLayersRef.current.forEach(l => l.remove());
+    diffLayersRef.current = [];
+
+    if (!map || !mapReady || !aiDiff) return;
+
+    const existingGeom = customGeometry ?? osrmGeometry;
+
+    // Existing route: blue dashed polyline (dimmed)
+    if (existingGeom && existingGeom.length >= 2) {
+      const existing = L.polyline(
+        existingGeom.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color: '#60A5FA', weight: 4, opacity: 0.5, dashArray: '10,6' }
+      ).bindTooltip('Trazado actual', { sticky: true }).addTo(map);
+      diffLayersRef.current.push(existing);
+    }
+
+    // New AI route: green solid polyline
+    if (aiDiff.newGeometry.length >= 2) {
+      const newLine = L.polyline(
+        aiDiff.newGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+        { color: '#22C55E', weight: 4, opacity: 0.9 }
+      ).bindTooltip('Nuevo trazado (IA)', { sticky: true }).addTo(map);
+      diffLayersRef.current.push(newLine);
+    }
+
+    // Waypoints: green = unchanged (<300 m), red = changed (≥300 m)
+    const CHANGE_THRESHOLD_M = 300;
+    aiDiff.newWaypoints.forEach((wp, i) => {
+      const dist = existingGeom ? existingGeom.reduce((min, gp) => {
+        const R = 6371000;
+        const dLat = (gp[0] - wp[0]) * Math.PI / 180;
+        const dLng = (gp[1] - wp[1]) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(wp[0]*Math.PI/180)*Math.cos(gp[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+        return Math.min(min, R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+      }, Infinity) : 0;
+      const changed = dist > CHANGE_THRESHOLD_M;
+      const circle = L.circleMarker([wp[0], wp[1]], {
+        radius: 7,
+        color: 'white',
+        weight: 2,
+        fillColor: changed ? '#EF4444' : '#22C55E',
+        fillOpacity: 1,
+      }).bindTooltip(`${i + 1}. ${aiDiff.labels[i] ?? ''}${changed ? ` · movido ~${Math.round(dist)}m` : ''}`, { sticky: true }).addTo(map);
+      diffLayersRef.current.push(circle);
+    });
+
+    // Fit map to new geometry bounds
+    if (aiDiff.newGeometry.length >= 2) {
+      const bounds = L.latLngBounds(aiDiff.newGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple));
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }, [aiDiff, mapReady, customGeometry, osrmGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render geometry on map ─────────────────────────────────────────────────
 
@@ -1527,7 +1647,47 @@ export default function AdminRoutes() {
                             : 'Geocodificar paradas'}
                         </button>
                       </div>
-                      {aiResult && (
+                      {/* AI diff comparison card */}
+                      {aiDiff ? (
+                        <div className="mt-3 rounded-lg border border-purple-700 bg-purple-900/30 p-3 text-xs space-y-2">
+                          <p className="font-semibold text-purple-200 flex items-center gap-1.5">
+                            <span>✨</span>
+                            <span>Comparación con trazado actual</span>
+                          </p>
+                          <div className="flex gap-3 text-xs">
+                            <span className="flex items-center gap-1"><span className="inline-block w-3 h-1 bg-blue-400 opacity-60 rounded" style={{borderTop:'2px dashed #60A5FA',background:'none'}}></span> Actual</span>
+                            <span className="flex items-center gap-1"><span className="inline-block w-3 h-1 bg-green-400 rounded"></span> Nuevo (IA)</span>
+                            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span> Movido</span>
+                          </div>
+                          {aiDiff.changedCount === 0 ? (
+                            <p className="text-green-400">✅ El trazado coincide con el actual — sin diferencias</p>
+                          ) : (
+                            <p className="text-amber-300">⚠️ {aiDiff.changedCount} de {aiDiff.newWaypoints.length} intersecciones se movieron más de 300 m</p>
+                          )}
+                          {aiDiff.failed.length > 0 && (
+                            <details className="text-amber-400 cursor-pointer">
+                              <summary>⚠️ {aiDiff.failed.length} sin geocodificar</summary>
+                              <ul className="mt-1 pl-2 space-y-0.5 text-gray-400">
+                                {aiDiff.failed.map((f, i) => <li key={i}>· {f}</li>)}
+                              </ul>
+                            </details>
+                          )}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={applyAiDiff}
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium text-xs px-2 py-1.5 rounded-lg transition-colors"
+                            >
+                              ✅ Aplicar correcciones
+                            </button>
+                            <button
+                              onClick={discardAiDiff}
+                              className="flex-1 bg-gray-600 hover:bg-gray-500 text-gray-200 font-medium text-xs px-2 py-1.5 rounded-lg transition-colors"
+                            >
+                              ❌ Descartar
+                            </button>
+                          </div>
+                        </div>
+                      ) : aiResult && (
                         <div className="mt-2 text-xs space-y-1">
                           <p className="text-green-400">✅ {aiResult.labels.length} intersecciones encontradas</p>
                           {aiResult.failed.length > 0 && (

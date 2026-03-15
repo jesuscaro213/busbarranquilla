@@ -25,6 +25,10 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
+// Railway (and most cloud platforms) sit behind a reverse proxy.
+// Trust the first proxy so express-rate-limit can read X-Forwarded-For correctly.
+app.set('trust proxy', 1);
+
 // Rate limiters
 // Solo para login/register/google — protección contra brute-force
 const authLimiter = rateLimit({

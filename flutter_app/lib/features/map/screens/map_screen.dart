@@ -71,6 +71,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       await ref.read(mapNotifierProvider.notifier).initialize();
       if (!mounted) return;
       _startPositionStream();
+
+      // Register waiting-mode socket handler once. It guards internally:
+      // returns early when no route is being waited for, so it's safe to
+      // leave registered at all times without interfering with map_provider.
+      ref.read(socketServiceProvider).on('bus:location', _onSocketBusLocation);
+
       // If waiting mode was already active before MapScreen mounted
       // (e.g. started from PlannerScreen or BoardingScreen), begin polling now.
       // ref.listen only fires on future changes, so we must bootstrap here.
@@ -102,10 +108,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _waitingPollTimer?.cancel();
     _positionSubscription?.cancel();
     _mapController.dispose();
-    // Remove socket listener if waiting mode was active when screen disposed
-    try {
-      ref.read(socketServiceProvider).off('bus:location');
-    } catch (_) {}
     super.dispose();
   }
 
@@ -121,11 +123,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
     _socketBusPositions.clear();
 
-    // Listen to real-time bus:location events — update immediately when any
-    // bus on the waited route moves, without waiting for the next poll cycle.
-    ref.read(socketServiceProvider).on('bus:location', _onSocketBusLocation);
-
-    // Initial fetch + fallback poll every 60s (catches socket gaps / reconnects)
+    // Initial fetch + fallback poll every 60s (catches socket gaps / reconnects).
+    // The socket listener is registered once in initState and guards internally.
     _pollWaitingRoute(route);
     _waitingPollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       final current = ref.read(selectedWaitingRouteProvider);
@@ -136,7 +135,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _stopWaiting() {
     _waitingPollTimer?.cancel();
     _waitingPollTimer = null;
-    ref.read(socketServiceProvider).off('bus:location');
+    // Do NOT call off('bus:location') — map_provider.dart also uses that event
+    // for live bus markers. _onSocketBusLocation already no-ops when waitingRoute==null.
     ref.read(waitingBusPositionsProvider.notifier).state = const <LatLng>[];
     _socketBusPositions.clear();
     if (mounted) {
@@ -182,10 +182,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       positions = const <LatLng>[];
     }
 
-    // Seed socket map with positions from HTTP (covers the case where socket
-    // missed a bus that started before we began listening)
+    // Seed socket map with positions from HTTP (covers buses that started
+    // before we began listening). Negative keys = poll-sourced; positive = socket.
+    // Clear old negative keys first to remove departed buses from previous poll.
+    _socketBusPositions.removeWhere((key, _) => key < 0);
     for (int i = 0; i < positions.length; i++) {
-      _socketBusPositions.putIfAbsent(-(i + 1), () => <LatLng>[]);
       _socketBusPositions[-(i + 1)] = <LatLng>[positions[i]];
     }
 

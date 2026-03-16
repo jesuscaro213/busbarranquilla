@@ -79,9 +79,9 @@ class DesvioMonitor {
         );
         if (d < minDistMeters) minDistMeters = d;
       }
-      if (minDistMeters > 100) {
+      if (minDistMeters > 50) {
         _offRouteAt ??= DateTime.now();
-        if (DateTime.now().difference(_offRouteAt!).inSeconds >= 60) {
+        if (DateTime.now().difference(_offRouteAt!).inSeconds >= 30) {
           _alerted = true;
           onDesvio();
         }
@@ -99,9 +99,9 @@ class DesvioMonitor {
           return d < min ? d : min;
         },
       );
-      if (minDistMeters > 100) {
+      if (minDistMeters > 50) {
         _offRouteAt ??= DateTime.now();
-        if (DateTime.now().difference(_offRouteAt!).inSeconds >= 60) {
+        if (DateTime.now().difference(_offRouteAt!).inSeconds >= 30) {
           _alerted = true;
           onDesvio();
         }

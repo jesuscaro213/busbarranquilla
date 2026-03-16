@@ -55,6 +55,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   int? _waitingEtaMinutes;    // null = no buses / can't calculate
   double? _waitingDistanceM;  // distance in meters to closest approaching bus
   bool _waitingBusNearNotified = false; // prevents repeated alerts
+  // Socket-based real-time positions for the waited route (routeId → positions)
+  final Map<int, List<LatLng>> _socketBusPositions = <int, List<LatLng>>{};
 
   @override
   void initState() {
@@ -100,6 +102,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _waitingPollTimer?.cancel();
     _positionSubscription?.cancel();
     _mapController.dispose();
+    // Remove socket listener if waiting mode was active when screen disposed
+    try {
+      ref.read(socketServiceProvider).off('bus:location');
+    } catch (_) {}
     super.dispose();
   }
 
@@ -113,8 +119,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _waitingDistanceM = null;
       _waitingBusNearNotified = false;
     });
+    _socketBusPositions.clear();
+
+    // Listen to real-time bus:location events — update immediately when any
+    // bus on the waited route moves, without waiting for the next poll cycle.
+    ref.read(socketServiceProvider).on('bus:location', _onSocketBusLocation);
+
+    // Initial fetch + fallback poll every 60s (catches socket gaps / reconnects)
     _pollWaitingRoute(route);
-    _waitingPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    _waitingPollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       final current = ref.read(selectedWaitingRouteProvider);
       if (current != null) _pollWaitingRoute(current);
     });
@@ -123,12 +136,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _stopWaiting() {
     _waitingPollTimer?.cancel();
     _waitingPollTimer = null;
+    ref.read(socketServiceProvider).off('bus:location');
     ref.read(waitingBusPositionsProvider.notifier).state = const <LatLng>[];
-    if (mounted) setState(() {
-      _waitingPolled = false;
-      _waitingEtaMinutes = null;
-      _waitingDistanceM = null;
-    });
+    _socketBusPositions.clear();
+    if (mounted) {
+      setState(() {
+        _waitingPolled = false;
+        _waitingEtaMinutes = null;
+        _waitingDistanceM = null;
+      });
+    }
+  }
+
+  void _onSocketBusLocation(dynamic data) {
+    if (!mounted) return;
+    final waitingRoute = ref.read(selectedWaitingRouteProvider);
+    if (waitingRoute == null) return;
+
+    final map = data as Map<dynamic, dynamic>;
+    final routeId = map['routeId'] as int?;
+    if (routeId != waitingRoute.id) return; // different route — ignore
+
+    final lat = (map['latitude'] as num?)?.toDouble();
+    final lng = (map['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) return;
+
+    final tripId = (map['tripId'] as int?) ?? 0;
+    final newPos = LatLng(lat, lng);
+
+    // Update position for this specific bus (keyed by tripId) and recalculate
+    _socketBusPositions[tripId] = <LatLng>[newPos];
+    _updateWaitingState(waitingRoute);
   }
 
   Future<void> _pollWaitingRoute(BusRoute route) async {
@@ -144,18 +182,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       positions = const <LatLng>[];
     }
 
-    ref.read(waitingBusPositionsProvider.notifier).state = positions;
+    // Seed socket map with positions from HTTP (covers the case where socket
+    // missed a bus that started before we began listening)
+    for (int i = 0; i < positions.length; i++) {
+      _socketBusPositions.putIfAbsent(-(i + 1), () => <LatLng>[]);
+      _socketBusPositions[-(i + 1)] = <LatLng>[positions[i]];
+    }
+
+    _updateWaitingState(route);
+  }
+
+  // Central update: recalculates ETA/distance from current positions and
+  // fires notification if needed. Called from both socket handler and poll.
+  void _updateWaitingState(BusRoute route) {
+    final allPositions = _socketBusPositions.values
+        .expand((list) => list)
+        .toList(growable: false);
+
+    ref.read(waitingBusPositionsProvider.notifier).state = allPositions;
 
     int? eta;
     double? distM;
     final userPos = _livePosition;
-    if (positions.isNotEmpty && userPos != null && route.geometry.isNotEmpty) {
-      final result = _calculateEtaAndDistance(positions, userPos, route.geometry);
-      eta = result.eta?.round();
-      distM = result.distanceMeters;
+    if (allPositions.isNotEmpty && userPos != null && route.geometry.isNotEmpty) {
+      final r = _calculateEtaAndDistance(allPositions, userPos, route.geometry);
+      eta = r.eta?.round();
+      distM = r.distanceMeters;
     }
 
-    // Notify user when bus is ≤ 2 minutes away (fires once per waiting session)
     if (!_waitingBusNearNotified && eta != null && eta <= 2) {
       _waitingBusNearNotified = true;
       final distText = distM != null ? _formatDistance(distM) : '';

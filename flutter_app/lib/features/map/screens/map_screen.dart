@@ -72,10 +72,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       if (!mounted) return;
       _startPositionStream();
 
-      // Register waiting-mode socket handler once. It guards internally:
-      // returns early when no route is being waited for, so it's safe to
+      // Register waiting-mode socket handlers once. They guard internally
+      // (return early when no route is being waited for) so they're safe to
       // leave registered at all times without interfering with map_provider.
       ref.read(socketServiceProvider).on('bus:location', _onSocketBusLocation);
+      ref.read(socketServiceProvider).on('bus:left', _onSocketBusLeft);
 
       // If waiting mode was already active before MapScreen mounted
       // (e.g. started from PlannerScreen or BoardingScreen), begin polling now.
@@ -167,6 +168,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // Update position for this specific bus (keyed by tripId) and recalculate
     _socketBusPositions[tripId] = <LatLng>[newPos];
     _updateWaitingState(waitingRoute);
+  }
+
+  void _onSocketBusLeft(dynamic data) {
+    if (!mounted) return;
+    final waitingRoute = ref.read(selectedWaitingRouteProvider);
+    if (waitingRoute == null) return;
+
+    final map = data as Map<dynamic, dynamic>;
+    final routeId = map['routeId'] as int?;
+    if (routeId != waitingRoute.id) return;
+
+    final tripId = map['tripId'] as int?;
+    if (tripId == null) return;
+
+    // Remove this passenger — they got off. Others on the same route remain.
+    if (_socketBusPositions.remove(tripId) != null) {
+      _updateWaitingState(waitingRoute);
+    }
   }
 
   Future<void> _pollWaitingRoute(BusRoute route) async {

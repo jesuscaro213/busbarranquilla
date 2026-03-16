@@ -47,12 +47,19 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   Widget build(BuildContext context) {
     // Auto-navigate to /trip when a trip starts from any tab.
+    // Also clears waiting mode here (shell is always in tree, unlike map_screen).
     ref.listen<TripState>(tripNotifierProvider, (previous, next) {
       if (next is TripActive && previous is! TripActive) {
+        // Clear any pending waiting route — trip has started
+        ref.read(selectedWaitingRouteProvider.notifier).state = null;
         final location = GoRouterState.of(context).matchedLocation;
         if (!location.startsWith('/trip')) {
           context.go('/trip');
         }
+      }
+      // Also clear on trip end to avoid stale waiting state after finishing
+      if ((next is TripIdle || next is TripEnded) && previous is TripActive) {
+        ref.read(selectedWaitingRouteProvider.notifier).state = null;
       }
     });
 
@@ -70,6 +77,13 @@ class _MainShellState extends ConsumerState<MainShell> {
     final isOnTrip = ref.watch(tripNotifierProvider.select((s) => s is TripActive));
     final isWaiting = ref.watch(selectedWaitingRouteProvider) != null;
     final currentIndex = isOnTrip ? 2 : _indexFromLocation(location);
+
+    // If waiting and somehow not on /map, redirect back immediately
+    if (isWaiting && !isOnTrip && !location.startsWith('/map')) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go('/map');
+      });
+    }
 
     Widget bottomBar;
     if (isOnTrip) {
@@ -105,9 +119,13 @@ class _MainShellState extends ConsumerState<MainShell> {
       );
     }
 
-    return Scaffold(
-      body: widget.child,
-      bottomNavigationBar: bottomBar,
+    return PopScope(
+      // Block back navigation while waiting — user must cancel explicitly via the bar
+      canPop: !isWaiting,
+      child: Scaffold(
+        body: widget.child,
+        bottomNavigationBar: bottomBar,
+      ),
     );
   }
 }
@@ -175,10 +193,10 @@ class _WaitingActiveBar extends ConsumerWidget {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Row(
           children: <Widget>[
-            const Icon(Icons.notifications_active, color: Colors.amber, size: 20),
+            const Icon(Icons.notifications_active, color: Colors.amber, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -207,12 +225,34 @@ class _WaitingActiveBar extends ConsumerWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: route == null
+                  ? null
+                  : () => context.push('/trip/confirm?routeId=${route.id}'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.success,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              icon: const Icon(Icons.directions_bus, size: 16),
+              label: const Text(
+                AppStrings.boardedWaitingButton,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
             TextButton(
               onPressed: () {
                 ref.read(selectedWaitingRouteProvider.notifier).state = null;
               },
-              style: TextButton.styleFrom(foregroundColor: Colors.white70),
-              child: const Text(AppStrings.waitingCancel),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(AppStrings.waitingCancel, style: TextStyle(fontSize: 12)),
             ),
           ],
         ),

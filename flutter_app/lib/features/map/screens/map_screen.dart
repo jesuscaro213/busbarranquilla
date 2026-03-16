@@ -216,12 +216,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
     });
 
-    // Auto-clear waiting mode when a trip starts
-    ref.listen<TripState>(tripNotifierProvider, (_, next) {
-      if (next is TripActive && ref.read(selectedWaitingRouteProvider) != null) {
-        ref.read(selectedWaitingRouteProvider.notifier).state = null;
-      }
-    });
 
     if (mapState is MapLoading) {
       return const Scaffold(body: LoadingIndicator());
@@ -392,10 +386,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
         ],
       ),
-      floatingActionButton: isOnTrip
+      // FAB hidden during active trip or while waiting (waiting bar has its own "¡Ya me subí!" button)
+      floatingActionButton: (isOnTrip || waitingRoute != null)
           ? null
           : FloatingActionButton.extended(
               onPressed: () => context.go('/trip/boarding'),
+              backgroundColor: AppColors.primary,
               label: const Text(AppStrings.boardedButton),
               icon: const Icon(Icons.directions_bus),
             ),

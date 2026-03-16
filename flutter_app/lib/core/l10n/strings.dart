@@ -59,6 +59,7 @@ abstract final class AppStrings {
   static const tabProfile = 'Perfil';
 
   static const boardedButton = 'Me subí';
+  static const boardedWaitingButton = '¡Ya me subí!';
   static const alightedButton = 'Me bajé';
   static const planButton = 'Buscar rutas';
   static const originLabel = 'Origen';

@@ -250,7 +250,7 @@ export default function AdminRoutes() {
   const [geomBeforeEdit, setGeomBeforeEdit] = useState<[number, number][] | null>(null);
   // Waypoints: puntos de control que el admin arrastra (pocos, extraídos de la geometría)
   const [waypoints, setWaypoints] = useState<[number, number][] | null>(null);
-  const [snapping, setSnapping] = useState(false);
+  const [snapping] = useState(false); // kept for button disabled states; no OSRM auto-routing in edit mode
 
   // ── Step 2 — map ────────────────────────────────────────────────────────────
   const [mapReady, setMapReady] = useState(false);
@@ -284,13 +284,16 @@ export default function AdminRoutes() {
   const isSegEraseModeRef = useRef(false);
   const segEraseLayersRef = useRef<L.Polyline[]>([]);
 
+  // Ref kept in sync with customGeometry so map event handlers always see the latest value
+  const customGeometryRef = useRef<[number, number][] | null>(null);
+
   // ── Map refs ────────────────────────────────────────────────────────────────
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
   const locatingStopRef = useRef<string | null>(null);
-  const geomMarkersRef = useRef<L.Marker[]>([]);
+  const geomMarkersRef = useRef<L.Layer[]>([]); // holds markers AND polylines for cleanup
   const geomPolylineRef = useRef<L.Polyline | null>(null);
   const isEditingGeometryRef = useRef(false);
   const waypointsRef = useRef<[number, number][] | null>(null);
@@ -701,18 +704,11 @@ export default function AdminRoutes() {
     return result;
   }
 
-  const snapAndUpdate = useCallback(async (wpts: [number, number][]) => {
-    setSnapping(true);
-    try {
-      const res = await routesApi.snapWaypoints(wpts);
-      setCustomGeometry(res.data.geometry as [number, number][]);
-    } catch {
-      // Fallback: usar los waypoints directamente si OSRM falla
-      setCustomGeometry(wpts);
-    } finally {
-      setSnapping(false);
-    }
-  }, []);
+  // Keep customGeometryRef in sync so event handlers inside the map useEffect always read current value
+  useEffect(() => {
+    customGeometryRef.current = customGeometry;
+  }, [customGeometry]);
+
 
   // ── Map initialization ─────────────────────────────────────────────────────
 
@@ -750,28 +746,28 @@ export default function AdminRoutes() {
           );
           setLocatingStop(null);
         } else if (isEditingGeometryRef.current && !isSegEraseModeRef.current) {
-          // Geometry edit mode — insert waypoint at the best position in the sequence
-          // (between the two consecutive waypoints that minimize detour), not always at the end
-          const newWpt: [number, number] = [e.latlng.lat, e.latlng.lng];
-          const current = waypointsRef.current ?? [];
-          let insertIdx = current.length; // default: append
-          if (current.length >= 2) {
-            const R = 6371000;
-            const dist = (a: [number,number], b: [number,number]) => {
-              const dLat = (b[0]-a[0])*Math.PI/180, dLng = (b[1]-a[1])*Math.PI/180;
-              const x = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
-              return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
-            };
+          // Geometry edit mode — insert new point directly into customGeometry (NO OSRM)
+          // Finds the segment in the existing geometry where inserting minimises detour
+          const newPt: [number, number] = [e.latlng.lat, e.latlng.lng];
+          const geom = customGeometryRef.current ?? [];
+          const R = 6371000;
+          const haverM = (a: [number,number], b: [number,number]) => {
+            const dLat = (b[0]-a[0])*Math.PI/180, dLng = (b[1]-a[1])*Math.PI/180;
+            const x = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+          };
+          let insertIdx = geom.length;
+          if (geom.length >= 2) {
             let bestCost = Infinity;
-            for (let i = 0; i < current.length - 1; i++) {
-              const cost = dist(current[i], newWpt) + dist(newWpt, current[i+1]) - dist(current[i], current[i+1]);
+            for (let i = 0; i < geom.length - 1; i++) {
+              // Skip NaN gap markers — never insert across a gap
+              if (isNaN(geom[i][0]) || isNaN(geom[i + 1][0])) continue;
+              const cost = haverM(geom[i], newPt) + haverM(newPt, geom[i+1]) - haverM(geom[i], geom[i+1]);
               if (cost < bestCost) { bestCost = cost; insertIdx = i + 1; }
             }
           }
-          const newWaypoints = [...current.slice(0, insertIdx), newWpt, ...current.slice(insertIdx)] as [number, number][];
-          setWaypoints(newWaypoints);
-          waypointsRef.current = newWaypoints;
-          snapAndUpdate(newWaypoints);
+          const newGeom = [...geom.slice(0, insertIdx), newPt, ...geom.slice(insertIdx)] as [number, number][];
+          setCustomGeometry(newGeom);
         } else {
           // Default — add stop
           setStops(prev => [
@@ -1065,37 +1061,50 @@ export default function AdminRoutes() {
   }, [aiDiff, mapReady, customGeometry, osrmGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render segment erase overlays ─────────────────────────────────────────
+  // Works directly on customGeometry chunks — NO waypoint manipulation.
+  // Each chunk is ~150m of the actual polyline, so segments match exactly what the user sees.
 
   useEffect(() => {
     const map = mapRef.current;
     segEraseLayersRef.current.forEach(l => l.remove());
     segEraseLayersRef.current = [];
 
-    if (!map || !mapReady || !isSegEraseMode || !waypoints || waypoints.length < 2 || !customGeometry || customGeometry.length < 2) return;
+    if (!map || !mapReady || !isSegEraseMode || !customGeometry || customGeometry.length < 2) return;
 
-    // Find nearest index in geometry for each waypoint
-    function nearestIdx(geom: [number, number][], pt: [number, number]): number {
-      let minD = Infinity, idx = 0;
-      const R = 6371000;
-      for (let i = 0; i < geom.length; i++) {
-        const dLat = (geom[i][0] - pt[0]) * Math.PI / 180;
-        const dLng = (geom[i][1] - pt[1]) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) ** 2 + Math.cos(pt[0] * Math.PI / 180) * Math.cos(geom[i][0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-        const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        if (d < minD) { minD = d; idx = i; }
+    const CHUNK_M = 150;
+    const R = 6371000;
+    const haversineM = (a: [number, number], b: [number, number]): number => {
+      const dLat = (b[0] - a[0]) * Math.PI / 180;
+      const dLng = (b[1] - a[1]) * Math.PI / 180;
+      const aa = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+    };
+
+    // Split geometry into ~150m chunks, never crossing NaN gap markers
+    const chunks: Array<{ start: number; end: number }> = [];
+    let chunkStart = -1;
+    let acc = 0;
+    for (let i = 0; i < customGeometry.length; i++) {
+      const pt = customGeometry[i];
+      if (isNaN(pt[0])) {
+        // Gap — close current chunk and reset
+        if (chunkStart >= 0 && i - 1 > chunkStart) chunks.push({ start: chunkStart, end: i - 1 });
+        chunkStart = -1; acc = 0;
+        continue;
       }
-      return idx;
+      if (chunkStart < 0) { chunkStart = i; continue; }
+      acc += haversineM(customGeometry[i - 1], pt);
+      if (acc >= CHUNK_M || i === customGeometry.length - 1) {
+        if (i > chunkStart) chunks.push({ start: chunkStart, end: i });
+        chunkStart = i; acc = 0;
+      }
     }
 
-    const wptIndices = waypoints.map(wp => nearestIdx(customGeometry, wp));
-
-    for (let i = 0; i < waypoints.length - 1; i++) {
-      const startIdx = Math.min(wptIndices[i], wptIndices[i + 1]);
-      const endIdx = Math.max(wptIndices[i], wptIndices[i + 1]);
-      const segPts = customGeometry.slice(startIdx, endIdx + 1);
+    for (const chunk of chunks) {
+      const segPts = customGeometry.slice(chunk.start, chunk.end + 1);
       if (segPts.length < 2) continue;
 
-      const segI = i; // capture for closure
+      const capturedChunk = chunk; // closure
       const layer = L.polyline(
         segPts.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
         { color: '#3B82F6', weight: 10, opacity: 0.0 }
@@ -1112,40 +1121,21 @@ export default function AdminRoutes() {
 
       layer.on('click', (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
-        const current = waypointsRef.current ?? [];
-        if (current.length <= 2) return;
+        if (customGeometry.length <= 2) return;
 
-        // Find geometry indices for this segment's endpoints
-        const gStart = nearestIdx(customGeometry, current[segI]);
-        const gEnd   = nearestIdx(customGeometry, current[segI + 1]);
-        const lo = Math.min(gStart, gEnd);
-        const hi = Math.max(gStart, gEnd);
-
-        // Slice out the erased segment directly — NO OSRM rerouting
+        // Remove the segment and leave a gap (NaN marker) — user reconnects manually by clicking
         const newGeom: [number, number][] = [
-          ...customGeometry.slice(0, lo + 1),  // keep up to segment start
-          ...customGeometry.slice(hi),          // jump past erased segment
+          ...customGeometry.slice(0, capturedChunk.start),
+          [NaN, NaN],
+          ...customGeometry.slice(capturedChunk.end),
         ];
-
-        // Remove the interior waypoints (keep absolute first and last)
-        const newWpts = current.filter((_, idx) => {
-          const isFirst = idx === 0;
-          const isLast  = idx === current.length - 1;
-          if (idx === segI     && !isFirst) return false;
-          if (idx === segI + 1 && !isLast)  return false;
-          return true;
-        }) as [number, number][];
-
-        if (newWpts.length < 2 || newGeom.length < 2) return;
-        setWaypoints(newWpts);
-        waypointsRef.current = newWpts;
-        setCustomGeometry(newGeom); // direct update — user reconnects manually
+        setCustomGeometry(newGeom);
       });
 
       layer.addTo(map);
       segEraseLayersRef.current.push(layer);
     }
-  }, [isSegEraseMode, waypoints, customGeometry, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isSegEraseMode, customGeometry, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reference geometry underlay (during diff-adjust and confirm) ───────────
 
@@ -1173,58 +1163,59 @@ export default function AdminRoutes() {
       geomPolylineRef.current = null;
     }
 
-    if (isEditingGeometry && !diffConfirmMode && waypoints && waypoints.length >= 1) {
-      // Draggable orange waypoint markers — drag to snap to roads, click to delete
-      waypoints.forEach(([lat, lng], idx) => {
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="background:#F59E0B;width:22px;height:22px;border-radius:50%;border:3px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.5);cursor:grab;display:flex;align-items:center;justify-content:center;">
-            <span style="color:white;font-size:9px;font-weight:bold;line-height:1;">${idx + 1}</span>
-          </div>`,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
-        });
+    // Helper: split geometry at NaN gap markers into continuous segments
+    function splitAtGaps(geom: [number, number][]): [number, number][][] {
+      const segs: [number, number][][] = [];
+      let cur: [number, number][] = [];
+      for (const pt of geom) {
+        if (isNaN(pt[0])) { if (cur.length >= 2) segs.push(cur); cur = []; }
+        else cur.push(pt);
+      }
+      if (cur.length >= 2) segs.push(cur);
+      return segs;
+    }
 
-        const marker = L.marker([lat, lng], { icon, draggable: true });
+    if (isEditingGeometry && !diffConfirmMode && customGeometry && customGeometry.length >= 2) {
+      const segments = splitAtGaps(customGeometry);
 
-        marker.on('dragend', () => {
-          const { lat: newLat, lng: newLng } = marker.getLatLng();
-          const newWaypoints = [...(waypointsRef.current ?? [])] as [number, number][];
-          newWaypoints[idx] = [newLat, newLng];
-          setWaypoints(newWaypoints);
-          waypointsRef.current = newWaypoints;
-          snapAndUpdate(newWaypoints);
-        });
-
-        marker.on('click', (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e);
-          const current = waypointsRef.current ?? [];
-          if (current.length <= 2) return;
-          const newWaypoints = current.filter((_, i) => i !== idx) as [number, number][];
-          setWaypoints(newWaypoints);
-          waypointsRef.current = newWaypoints;
-          snapAndUpdate(newWaypoints);
-        });
-
-        marker.addTo(map);
-        geomMarkersRef.current.push(marker);
+      // Draw each continuous segment as a blue line
+      segments.forEach(seg => {
+        const pl = L.polyline(seg.map(([lat, lng]) => [lat, lng] as L.LatLngTuple), { color: '#3B82F6', weight: 4, opacity: 0.9 }).addTo(map);
+        geomMarkersRef.current.push(pl);
       });
 
-      // Blue polyline (OSRM-snapped, many points) while editing
-      if (customGeometry && customGeometry.length >= 2) {
+      // Draw dashed gray line + red endpoint dots at each gap
+      let prevSeg: [number, number][] | null = null;
+      for (const seg of segments) {
+        if (prevSeg) {
+          const gapFrom = prevSeg[prevSeg.length - 1];
+          const gapTo = seg[0];
+          // Dashed gray connector — visually shows the gap the user must fill
+          const gapLine = L.polyline([[gapFrom[0], gapFrom[1]], [gapTo[0], gapTo[1]]], {
+            color: '#9CA3AF', weight: 2, opacity: 0.7, dashArray: '6,8',
+          }).bindTooltip('⚠️ Hueco — haz clic en el mapa para conectar', { sticky: true }).addTo(map);
+          geomMarkersRef.current.push(gapLine);
+          // Red dots at gap endpoints
+          [gapFrom, gapTo].forEach(pt => {
+            const dot = L.circleMarker([pt[0], pt[1]], { radius: 6, color: '#EF4444', weight: 2, fillColor: '#EF4444', fillOpacity: 1 }).addTo(map);
+            geomMarkersRef.current.push(dot);
+          });
+        }
+        prevSeg = seg;
+      }
+
+      // Keep geomPolylineRef null — cleanup handled via geomMarkersRef
+    } else if (!isEditingGeometry && customGeometry && customGeometry.length >= 2) {
+      // Green polyline when not editing — filter out any NaN gaps
+      const cleanGeom = customGeometry.filter(pt => !isNaN(pt[0]));
+      if (cleanGeom.length >= 2) {
         geomPolylineRef.current = L.polyline(
-          customGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-          { color: '#3B82F6', weight: 3, opacity: 0.9 }
+          cleanGeom.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
+          { color: '#10B981', weight: 4, opacity: 0.8 }
         ).addTo(map);
       }
-    } else if (!isEditingGeometry && customGeometry && customGeometry.length >= 2) {
-      // Green polyline when saved / not editing
-      geomPolylineRef.current = L.polyline(
-        customGeometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-        { color: '#10B981', weight: 4, opacity: 0.8 }
-      ).addTo(map);
     }
-  }, [isEditingGeometry, customGeometry, waypoints, mapReady, snapAndUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEditingGeometry, customGeometry, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Save route (create or edit) ────────────────────────────────────────────
 
@@ -1254,7 +1245,8 @@ export default function AdminRoutes() {
       };
 
       if (customGeometry !== null) {
-        payload.geometry = customGeometry;
+        // Filter out NaN gap markers before saving
+        payload.geometry = customGeometry.filter(pt => !isNaN(pt[0]));
       }
 
       let routeId: number;
@@ -2067,9 +2059,9 @@ export default function AdminRoutes() {
                       {isEditingGeometry ? (
                         <div className="space-y-1.5">
                           <p className="text-xs text-gray-400 mb-2 leading-tight">
-                            {snapping
-                              ? '⏳ Calculando ruta por calles…'
-                              : `✏️ Clic en el mapa para dibujar el recorrido · ${waypoints?.length ?? 0} punto${waypoints?.length !== 1 ? 's' : ''} · arrastra para mover · clic en punto para eliminar`
+                            {isSegEraseMode
+                              ? '🗑️ Pasa el cursor sobre la ruta — se pondrá rojo. Clic para borrar ese tramo.'
+                              : '✏️ Clic en cualquier punto del mapa para agregar un nodo · Usa "Borrar tramo" para eliminar partes'
                             }
                           </p>
                           {refTracks.length > 0 && (
@@ -2106,9 +2098,14 @@ export default function AdminRoutes() {
                               </div>
                               <button
                                 onClick={() => {
-                                  // Keep current dense waypoints — erase mode already densified them
                                   setIsSegEraseMode(false);
                                   isSegEraseModeRef.current = false;
+                                  // Re-extract waypoints from the (possibly shorter) geometry so edit mode is fresh
+                                  if (customGeometry && customGeometry.length >= 2) {
+                                    const wpts = extractDenseWaypoints(customGeometry);
+                                    setWaypoints(wpts);
+                                    waypointsRef.current = wpts;
+                                  }
                                 }}
                                 className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium px-3 py-2 rounded-lg transition-colors"
                               >
@@ -2118,12 +2115,6 @@ export default function AdminRoutes() {
                           ) : (
                             <button
                               onClick={() => {
-                                // Densify waypoints to ~150m spacing so each erasable segment = one street block
-                                if (customGeometry && customGeometry.length >= 2) {
-                                  const denseWpts = extractDenseWaypoints(customGeometry, 150);
-                                  setWaypoints(denseWpts);
-                                  waypointsRef.current = denseWpts;
-                                }
                                 setIsSegEraseMode(true);
                                 isSegEraseModeRef.current = true;
                               }}

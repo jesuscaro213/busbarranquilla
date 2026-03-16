@@ -27,7 +27,7 @@ El sistema tiene una **economía de créditos** para incentivar la participació
 | Web frontend | React + Vite + TailwindCSS + Leaflet |
 | App móvil | Flutter 3 + Dart (`flutter_app/`) |
 | Pagos | Wompi (pagos colombianos) |
-| Geocodificación | Nominatim (primario) + Geoapify (fallback) |
+| Geocodificación | Nominatim (primario) + Google Maps (secundario) + Geoapify (fallback web) |
 | Mapas móvil | flutter_map 7 + OpenStreetMap |
 | Mapas web | Leaflet |
 
@@ -822,19 +822,26 @@ Cuando el usuario está en `BoardingScreen` y toca `RoutePreviewSheet`, puede el
 
 ### Web Admin — Editor de trazado (AdminRoutes.tsx)
 
-**Herramienta borrador (eraser tool) — añadida 2026-03-15:**
-- Botón `🧹 Borrador — eliminar tramo` visible solo en modo `isEditingGeometry`
-- Al activarlo: `isEraserMode = true`, cursor cambia a crosshair
-- Clicks en el mapa añaden puntos a `eraserPointsRef` y se dibujan como polilínea roja punteada con círculos
-- `applyEraser()`: filtra waypoints dentro de `ERASE_RADIUS_M = 300` m de cualquier punto de la ruta trazada → llama `snapAndUpdate(remaining)` con los puntos restantes; aborta si quedarían < 2 puntos
-- UI en modo borrador: contador de puntos, botón `✓ Borrar tramo` (disabled si < 2 pts) y botón `Cancelar`
-- El borrador queda anulado (estado limpiado) al cerrar el modal (`closeModal`) y al cancelar
+**Herramienta borrado por segmento (segment erase) — actualizada 2026-03-15:**
+- Reemplaza el antiguo borrador freehand por un modo intuitivo: `isSegEraseMode` state + `isSegEraseModeRef` + `segEraseLayersRef`
+- Botón `🗑️ Borrar tramo — clic en la ruta` visible solo en modo `isEditingGeometry`, disabled si < 2 waypoints
+- Al activarlo: cursor cambia a `pointer`; un `useEffect` crea polilíneas invisibles (weight 10, opacity 0) sobre cada segmento entre waypoints consecutivos
+- Hover sobre segmento → se pone rojo (opacity 0.65) + tooltip "🗑️ Click para borrar este tramo"
+- Click en segmento → elimina los dos waypoints del segmento (respetando primer/último waypoint) → `snapAndUpdate(newWpts)`
+- En modo erase activo: instrucción descriptiva + botón `← Volver a dibujar` para salir sin borrar
+- El modo se limpia en `closeModal`, en `cancelar`, y en `previsualizar cambios`
 
 **Revert de segmento en diff de IA — añadido 2026-03-15:**
 - Los segmentos verdes (nuevos) del diff de IA ahora tienen tooltip `🟢 Tramo nuevo — click para revertir al original`
 - Al hacer click en un segmento verde → `revertSegment(segIdx)`: reemplaza ese tramo en la nueva geometría con el fragmento correspondiente de la geometría original, recalcula los segmentos y actualiza el estado `aiDiff`
-- Implementado como función local dentro del `useEffect` del diff overlay; usa `currentAiDiff` (const local) para evitar error TS18047 de posible null
+
+**Parser IA de descripción de rutas (routeDescriptionController.ts) — mejorado 2026-03-15:**
+- El prompt de Claude ahora pide municipio en cada punto: `"Carrera 5 con Calle 37, Barranquilla"` o `"Carrera 15 con Calle 30, Soledad"`
+- La función `parseRouteDescription` parsea `lastIndexOf(', ')` para separar `intersection` de `city`
+- Geocodificación en 3 pasos: 1) Overpass en paralelo, 2) Google Maps para los fallidos (paralelo, usa `VITE_GOOGLE_MAPS_KEY`), 3) Nominatim secuencial con `city` param
+- `geocodeViaNominatim` acepta `city` param y lo usa en todas las queries (ya no hardcodea Barranquilla)
+- `geocodeViaGoogle`: valida bbox BQ metro (lat 10.7–11.2, lng -75.1–-74.5); intenta query con `city` y fallback `Barranquilla`
 
 ---
 
-*Última actualización: 2026-03-15 (v22)*
+*Última actualización: 2026-03-15 (v23)*

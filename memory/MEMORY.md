@@ -38,32 +38,38 @@
 - Botón desaparece si ya confirmó o llegó al límite de 3
 - Contador de créditos de confirmación ganados en el viaje
 
-## AdminRoutes — Editor de trazado: herramienta borrador (2026-03-15)
+## AdminRoutes — Editor de trazado: borrado por segmento (2026-03-15)
 
-### Estados y refs añadidos
-- `isEraserMode` / `isEraserModeRef` — controlan si el modo borrador está activo
-- `eraserPoints` / `eraserPointsRef` — puntos trazados en el mapa como camino de borrado
-- `eraserPolylineRef` / `eraserMarkersRef` — capas Leaflet del camino borrador
+### Estados y refs (borrador freehand reemplazado por segmento)
+- `isSegEraseMode` / `isSegEraseModeRef` — controlan si el modo borrado por segmento está activo
+- `segEraseLayersRef` — capas Leaflet invisibles (weight 10, opacity 0) sobre cada segmento entre waypoints consecutivos
 
-### Flujo de la herramienta borrador
-1. Botón `🧹 Borrador` aparece en la sección "Trazado" cuando `isEditingGeometry = true`
-2. Al activar: cursor = crosshair, banner informativo con contador de puntos
-3. Clicks en mapa añaden puntos al path del borrador (dibujado en rojo punteado)
-4. `applyEraser()`: filtra waypoints dentro de 300 m del path → llama `snapAndUpdate(remaining)`
-5. Si quedan < 2 waypoints → `window.alert(...)` y aborta
-6. Al confirmar o cancelar: `isEraserMode = false`, `eraserPoints = []`
+### Flujo del borrado por segmento
+1. Botón `🗑️ Borrar tramo — clic en la ruta` aparece cuando `isEditingGeometry = true` y hay ≥ 2 waypoints
+2. Al activar: cursor = `pointer`; useEffect crea capas Leaflet invisibles sobre cada segmento entre waypoints consecutivos
+3. Hover sobre segmento → color rojo (opacity 0.65) + tooltip; mouseout → invisible de nuevo
+4. Click en segmento → elimina los dos waypoints del segmento (respeta primer/último waypoint) → `snapAndUpdate(newWpts)`
+5. Si quedarían < 2 waypoints → `window.alert(...)` y aborta
+6. Salida: botón `← Volver a dibujar`, o al cerrar modal, cancelar, previsualizar
+
+### Cambios en map click handler
+- El bloque `isEraserModeRef` eliminado; ahora la condición de "añadir waypoint" es `isEditingGeometryRef.current && !isSegEraseModeRef.current`
 
 ### TS issue resuelto: aiDiff posiblemente null dentro de función anidada
 - `revertSegment()` vive dentro de un `useEffect` donde `aiDiff` ya fue verificado como no-null
 - TypeScript no estrecha el tipo dentro de funciones anidadas → solución: `const currentAiDiff = aiDiff;` antes de definir la función
 - `setAiDiff` en `revertSegment` usa campos explícitos (`newWaypoints`, `newStops`, `labels`, `failed`) en vez de spread para garantizar todos los campos requeridos
 
+## Parser IA de rutas — geocodificación mejorada (2026-03-15)
+
+### routeDescriptionController.ts — cambios
+- Prompt Claude ahora pide municipio al final: `"Calle X con Carrera Y, Barranquilla"` o `"..., Soledad"`
+- `parseRouteDescription` usa `lastIndexOf(', ')` para separar `intersection` de `city`
+- Geocodificación en 3 pasos: Overpass (paralelo) → Google Maps (paralelo, `VITE_GOOGLE_MAPS_KEY`) → Nominatim (secuencial)
+- `geocodeViaNominatim(street1, street2, city = 'Barranquilla')` — acepta `city`, ya no hardcodea Barranquilla en todas las queries; la cuarta query sigue usando `Barranquilla` como fallback explícito
+- `geocodeViaGoogle(intersection, city)` — valida bbox BQ metro; intenta con `city` y fallback `Barranquilla`
+- Variable de entorno requerida: `VITE_GOOGLE_MAPS_KEY` (si no está definida, `geocodeViaGoogle` retorna null silenciosamente)
+
 ## Archivos clave modificados (esta sesión)
-- `backend/src/index.ts` — socket rooms
-- `backend/src/config/schema.ts` — report_confirmations + credits_awarded_to_reporter
-- `backend/src/controllers/reportController.ts` — createReport, confirmReport, getRouteReports
-- `backend/src/controllers/tripController.ts` — auto-award al endTrip
-- `backend/src/routes/reportRoutes.ts` — GET /route/:routeId
-- `web/src/services/api.ts` — getRouteReports, ReportType sin casi_lleno
-- `web/src/components/CatchBusMode.tsx` — socket, RouteReport, UI confirmaciones
-- `web/src/pages/Map.tsx` — OCCUPANCY_BADGE sin casi_lleno
+- `backend/src/controllers/routeDescriptionController.ts` — geocodificación multimunicipio + Google Maps
+- `web/src/pages/admin/AdminRoutes.tsx` — borrado por segmento (reemplaza borrador freehand)

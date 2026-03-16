@@ -40,6 +40,7 @@ import '../widgets/active_feed_bar.dart';
 import '../widgets/active_route_bus_layer.dart';
 import '../widgets/bus_marker_layer.dart';
 import '../widgets/plan_markers_layer.dart';
+import '../widgets/quick_board_sheet.dart';
 import '../widgets/report_marker_layer.dart';
 import '../widgets/user_marker_layer.dart';
 
@@ -64,6 +65,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _waitingBusNearNotified = false; // prevents repeated alerts
   // Socket-based real-time positions for the waited route (routeId → positions)
   final Map<int, List<LatLng>> _socketBusPositions = <int, List<LatLng>>{};
+
+  // ── Auto-boarding — Mecanismo 1 (señal de otro pasajero) ──────────────────
+  DateTime? _autoboardProximityStart; // cuando usuario llegó a <40m del ancla
+  LatLng? _autoboardUserPosAtStart; // GPS usuario en T=0 de proximidad
+  LatLng? _autoboardBusPosAtStart; // GPS ancla en T=0
+  int? _autoboardAnchorTripId; // tripId siendo monitoreado
+
+  // ── Auto-boarding — Mecanismo 2 y 3 (GPS propio sobre geometría) ──────────
+  LatLng? _waitingStartPosition; // GPS al activar modo espera
+  DateTime? _onRouteStart; // inicio de período "sobre la ruta" (M2)
+  DateTime? _offRouteStart; // inicio de período "fuera de ruta" (M3)
+  Timer? _gpsMovementTimer; // tick cada 30s para M2 y M3
+  LatLng? _userPosAtOnRouteStart; // GPS usuario cuando _onRouteStart se asignó
+  LatLng? _userPosAtOffRouteStart; // GPS usuario cuando _offRouteStart se asignó
+  bool _slowAlertShown = false; // evita mostrar el diálogo M4 repetidamente
+  bool _farAlertShown = false; // evita mostrar el diálogo M5 repetidamente
+
+  // ── Compartido ────────────────────────────────────────────────────────────
+  bool _autoboardPending = false; // bloquea doble disparo
+  Timer? _autoboardUndoTimer; // ventana de 8s para deshacer
 
   @override
   void initState() {
@@ -114,6 +135,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void dispose() {
     _waitingPollTimer?.cancel();
+    _autoboardUndoTimer?.cancel();
+    _gpsMovementTimer?.cancel();
     _positionSubscription?.cancel();
     _mapController.dispose();
     super.dispose();
@@ -131,6 +154,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
     _socketBusPositions.clear();
 
+    _resetM1Tracking();
+    _autoboardPending = false;
+    _autoboardUndoTimer?.cancel();
+    _waitingStartPosition = _livePosition;
+    _startGpsMovementMonitor(route);
+
     // Initial fetch + fallback poll every 60s (catches socket gaps / reconnects).
     // The socket listener is registered once in initState and guards internally.
     _pollWaitingRoute(route);
@@ -147,6 +176,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // for live bus markers. _onSocketBusLocation already no-ops when waitingRoute==null.
     ref.read(waitingBusPositionsProvider.notifier).state = const <LatLng>[];
     _socketBusPositions.clear();
+
+    _resetM1Tracking();
+    _autoboardPending = false;
+    _autoboardUndoTimer?.cancel();
+    _gpsMovementTimer?.cancel();
+    _waitingStartPosition = null;
+    _onRouteStart = null;
+    _offRouteStart = null;
+    _userPosAtOnRouteStart = null;
+    _userPosAtOffRouteStart = null;
+    _slowAlertShown = false;
+    _farAlertShown = false;
+
     if (mounted) {
       setState(() {
         _waitingPolled = false;
@@ -154,6 +196,319 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _waitingDistanceM = null;
       });
     }
+  }
+
+  void _resetM1Tracking() {
+    _autoboardProximityStart = null;
+    _autoboardUserPosAtStart = null;
+    _autoboardBusPosAtStart = null;
+    _autoboardAnchorTripId = null;
+  }
+
+  void _checkAutoBoarding(BusRoute route) {
+    if (_autoboardPending) return;
+    if (ref.read(tripNotifierProvider) is! TripIdle) return;
+
+    final userPos = _livePosition;
+    if (userPos == null || _socketBusPositions.isEmpty) {
+      _resetM1Tracking();
+      return;
+    }
+
+    int? closestTripId;
+    LatLng? closestBusPos;
+    double closestDist = double.infinity;
+    for (final entry in _socketBusPositions.entries) {
+      if (entry.key < 0 || entry.value.isEmpty) continue;
+      final pos = entry.value.first;
+      final d = LocationService.distanceMeters(
+        userPos.latitude,
+        userPos.longitude,
+        pos.latitude,
+        pos.longitude,
+      );
+      if (d < closestDist) {
+        closestDist = d;
+        closestTripId = entry.key;
+        closestBusPos = pos;
+      }
+    }
+
+    if (closestTripId == null || closestBusPos == null || closestDist >= 40) {
+      _resetM1Tracking();
+      return;
+    }
+
+    if (_autoboardAnchorTripId != null && _autoboardAnchorTripId != closestTripId) {
+      _resetM1Tracking();
+    }
+
+    if (_autoboardProximityStart == null) {
+      _autoboardProximityStart = DateTime.now();
+      _autoboardUserPosAtStart = userPos;
+      _autoboardBusPosAtStart = closestBusPos;
+      _autoboardAnchorTripId = closestTripId;
+      return;
+    }
+
+    if (!_socketBusPositions.containsKey(_autoboardAnchorTripId)) {
+      _resetM1Tracking();
+      return;
+    }
+
+    final elapsed = DateTime.now().difference(_autoboardProximityStart!);
+    if (elapsed < const Duration(minutes: 3)) return;
+
+    final userMoved = LocationService.distanceMeters(
+      _autoboardUserPosAtStart!.latitude,
+      _autoboardUserPosAtStart!.longitude,
+      userPos.latitude,
+      userPos.longitude,
+    );
+    final busMoved = LocationService.distanceMeters(
+      _autoboardBusPosAtStart!.latitude,
+      _autoboardBusPosAtStart!.longitude,
+      closestBusPos.latitude,
+      closestBusPos.longitude,
+    );
+
+    if (userMoved >= 100 && busMoved >= 100) {
+      _triggerAutoBoarding(route);
+    }
+  }
+
+  void _startGpsMovementMonitor(BusRoute route) {
+    _gpsMovementTimer?.cancel();
+    _onRouteStart = null;
+    _offRouteStart = null;
+
+    if (route.geometry.isEmpty) return;
+
+    _gpsMovementTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_autoboardPending) return;
+      if (ref.read(tripNotifierProvider) is! TripIdle) return;
+
+      final userPos = _livePosition;
+      final startPos = _waitingStartPosition;
+      if (userPos == null || startPos == null) return;
+
+      final distFromStart = LocationService.distanceMeters(
+        startPos.latitude,
+        startPos.longitude,
+        userPos.latitude,
+        userPos.longitude,
+      );
+
+      if (distFromStart < 200) {
+        _onRouteStart = null;
+        _offRouteStart = null;
+        return;
+      }
+
+      final distToRoute = _distToRouteGeometry(userPos, route.geometry);
+
+      if (distToRoute < 150) {
+        _offRouteStart = null;
+        _userPosAtOffRouteStart = null;
+        _farAlertShown = false;
+
+        if (_onRouteStart == null) {
+          _onRouteStart = DateTime.now();
+          _userPosAtOnRouteStart = userPos;
+          return;
+        }
+
+        final onRouteElapsed = DateTime.now().difference(_onRouteStart!);
+
+        final distFromOnRouteStart = _userPosAtOnRouteStart != null
+            ? LocationService.distanceMeters(
+                _userPosAtOnRouteStart!.latitude,
+                _userPosAtOnRouteStart!.longitude,
+                userPos.latitude,
+                userPos.longitude,
+              )
+            : distFromStart;
+
+        final elapsedSec = onRouteElapsed.inSeconds.toDouble();
+        final speedKmh = elapsedSec > 0 ? (distFromOnRouteStart / elapsedSec) * 3.6 : 0.0;
+
+        if (speedKmh >= 10 && onRouteElapsed >= const Duration(minutes: 4)) {
+          _triggerAutoBoarding(route);
+          return;
+        }
+
+        if (speedKmh < 10 &&
+            distFromOnRouteStart >= 200 &&
+            onRouteElapsed >= const Duration(minutes: 8) &&
+            !_slowAlertShown) {
+          _slowAlertShown = true;
+          _onRouteStart = null;
+          _userPosAtOnRouteStart = null;
+          if (mounted) _showSlowOnRouteDialog(route);
+          return;
+        }
+      }
+
+      if (distToRoute > 300) {
+        _onRouteStart = null;
+        _userPosAtOnRouteStart = null;
+        _slowAlertShown = false;
+
+        if (_offRouteStart == null) {
+          _offRouteStart = DateTime.now();
+          _userPosAtOffRouteStart = userPos;
+          return;
+        }
+
+        final offRouteElapsed = DateTime.now().difference(_offRouteStart!);
+
+        final distFromOffRouteStart = _userPosAtOffRouteStart != null
+            ? LocationService.distanceMeters(
+                _userPosAtOffRouteStart!.latitude,
+                _userPosAtOffRouteStart!.longitude,
+                userPos.latitude,
+                userPos.longitude,
+              )
+            : distFromStart;
+
+        final elapsedSec = offRouteElapsed.inSeconds.toDouble();
+        final speedKmh = elapsedSec > 0 ? (distFromOffRouteStart / elapsedSec) * 3.6 : 0.0;
+
+        if (speedKmh >= 10 && offRouteElapsed >= const Duration(minutes: 4)) {
+          _gpsMovementTimer?.cancel();
+          if (mounted) {
+            ref.read(selectedWaitingRouteProvider.notifier).state = null;
+            AppSnackbar.show(context, AppStrings.waitingAutoCancelled, SnackbarType.info);
+          }
+          return;
+        }
+
+        if (speedKmh < 10 &&
+            distFromStart > 1000 &&
+            offRouteElapsed >= const Duration(minutes: 5) &&
+            !_farAlertShown) {
+          _farAlertShown = true;
+          _offRouteStart = null;
+          _userPosAtOffRouteStart = null;
+          if (mounted) _showFarOffRouteDialog();
+          return;
+        }
+      }
+    });
+  }
+
+  void _triggerAutoBoarding(BusRoute route) {
+    if (_autoboardPending) return;
+    _autoboardPending = true;
+    _resetM1Tracking();
+    _gpsMovementTimer?.cancel();
+    _autoboardUndoTimer?.cancel();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${AppStrings.autoboardDetected} · ${route.code}'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: AppStrings.autoboardUndo,
+          onPressed: () {
+            _autoboardUndoTimer?.cancel();
+            _autoboardPending = false;
+            if (mounted) {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              AppSnackbar.show(context, AppStrings.autoboardCancelled, SnackbarType.info);
+            }
+          },
+        ),
+      ),
+    );
+
+    _autoboardUndoTimer = Timer(const Duration(seconds: 8), () async {
+      if (!_autoboardPending) return;
+      _autoboardPending = false;
+
+      if (!mounted) return;
+      if (ref.read(tripNotifierProvider) is! TripIdle) return;
+
+      ref.read(selectedWaitingRouteProvider.notifier).state = null;
+
+      await ref.read(tripNotifierProvider.notifier).startTrip(route.id);
+
+      if (!mounted) return;
+      final newState = ref.read(tripNotifierProvider);
+      if (newState is TripActive) {
+        context.go('/trip');
+      } else if (newState is TripError) {
+        AppSnackbar.show(context, newState.message, SnackbarType.error);
+      }
+    });
+  }
+
+  void _showSlowOnRouteDialog(BusRoute route) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.waitingSlowOnRouteTitle),
+        content: const Text(AppStrings.waitingSlowOnRouteBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _slowAlertShown = false);
+            },
+            child: const Text(AppStrings.waitingSlowOnRouteNo),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                builder: (_) => const QuickBoardSheet(),
+              );
+            },
+            child: const Text(AppStrings.waitingSlowOnRouteOther),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _triggerAutoBoarding(route);
+            },
+            child: Text('${AppStrings.waitingSlowOnRouteYes}${route.code}'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFarOffRouteDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.waitingFarOffRouteTitle),
+        content: const Text(AppStrings.waitingFarOffRouteBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _farAlertShown = false);
+            },
+            child: const Text(AppStrings.waitingFarOffRouteContinue),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(selectedWaitingRouteProvider.notifier).state = null;
+            },
+            child: const Text(AppStrings.waitingFarOffRouteCancel),
+          ),
+        ],
+      ),
+    );
   }
 
   void _onSocketBusLocation(dynamic data) {
@@ -256,6 +611,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ));
     }
 
+    _checkAutoBoarding(route);
+
     if (mounted) {
       setState(() {
         _waitingPolled = true;
@@ -336,6 +693,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (!hasVibrator) return;
     // Two short pulses: bzzz-pause-bzzz
     await Vibration.vibrate(pattern: <int>[0, 400, 200, 400]);
+  }
+
+  static double _distToRouteGeometry(LatLng point, List<LatLng> geometry) {
+    if (geometry.isEmpty) return double.infinity;
+    double minDist = double.infinity;
+    for (final geoPoint in geometry) {
+      final d = LocationService.distanceMeters(
+        point.latitude,
+        point.longitude,
+        geoPoint.latitude,
+        geoPoint.longitude,
+      );
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
   }
 
   // Groups positions within [thresholdMeters] into one centroid per cluster.

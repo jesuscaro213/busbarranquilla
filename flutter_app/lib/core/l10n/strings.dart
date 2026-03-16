@@ -310,6 +310,25 @@ abstract final class AppStrings {
   static const waitingEtaMinutes = 'min';
   static const waitingActiveBar = '🔔 Esperando bus';
   static const waitingBusNearTitle = 'Tu bus está cerca';
+  static const autoboardDetected = 'Subiste al bus automáticamente';
+  static const autoboardUndo = 'Deshacer';
+  static const autoboardCancelled = 'Auto-boarding cancelado';
+  static const waitingAutoCancelled = 'Modo espera cancelado — parece que tomaste otro bus';
+  static const waitingSlowOnRouteTitle = '¿Ya te subiste al bus?';
+  static const waitingSlowOnRouteBody =
+      'Llevas varios minutos moviéndote sobre esta ruta a velocidad baja.';
+  static const waitingSlowOnRouteYes = 'Sí, estoy en el ';
+  static const waitingSlowOnRouteOther = 'Cogí otro bus';
+  static const waitingSlowOnRouteNo = 'No, sigo esperando';
+
+  static const waitingFarOffRouteTitle = '¿Sigues esperando el bus?';
+  static const waitingFarOffRouteBody =
+      'Te has alejado más de 1 km de la ruta. ¿Todavía quieres tomar este bus?';
+  static const waitingFarOffRouteContinue = 'Sigo esperando';
+  static const waitingFarOffRouteCancel = 'Ya no voy a tomarlo';
+
+  static const quickBoardTitle = 'Selecciona tu bus';
+  static const quickBoardSearchHint = 'Buscar ruta...';
 
   // ── Notification opt-in dialog ──────────────────────────────────────────
   static const notifOptInDecline = 'No por ahora';

@@ -219,13 +219,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         .expand((list) => list)
         .toList(growable: false);
 
-    ref.read(waitingBusPositionsProvider.notifier).state = allPositions;
+    // Cluster nearby passengers into one marker per physical bus.
+    // 10 people on the same bus show as 1 icon, not 10.
+    final clustered = _clusterPositions(allPositions, 50);
+    ref.read(waitingBusPositionsProvider.notifier).state = clustered;
 
     int? eta;
     double? distM;
     final userPos = _livePosition;
-    if (allPositions.isNotEmpty && userPos != null && route.geometry.isNotEmpty) {
-      final r = _calculateEtaAndDistance(allPositions, userPos, route.geometry);
+    if (clustered.isNotEmpty && userPos != null && route.geometry.isNotEmpty) {
+      final r = _calculateEtaAndDistance(clustered, userPos, route.geometry);
       eta = r.eta?.round();
       distM = r.distanceMeters;
     }
@@ -257,6 +260,33 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (!hasVibrator) return;
     // Two short pulses: bzzz-pause-bzzz
     await Vibration.vibrate(pattern: <int>[0, 400, 200, 400]);
+  }
+
+  // Groups positions within [thresholdMeters] into one centroid per cluster.
+  // Passengers on the same physical bus become a single map marker.
+  static List<LatLng> _clusterPositions(List<LatLng> positions, double thresholdMeters) {
+    final clusters = <List<LatLng>>[];
+    for (final pos in positions) {
+      bool merged = false;
+      for (final cluster in clusters) {
+        final c = _centroid(cluster);
+        if (LocationService.distanceMeters(
+              pos.latitude, pos.longitude, c.latitude, c.longitude) <=
+            thresholdMeters) {
+          cluster.add(pos);
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) clusters.add(<LatLng>[pos]);
+    }
+    return clusters.map(_centroid).toList(growable: false);
+  }
+
+  static LatLng _centroid(List<LatLng> pts) {
+    final lat = pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length;
+    final lng = pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length;
+    return LatLng(lat, lng);
   }
 
   // Project point onto polyline → find nearest vertex index

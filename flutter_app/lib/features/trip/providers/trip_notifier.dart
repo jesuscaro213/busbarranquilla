@@ -37,15 +37,27 @@ class TripNotifier extends Notifier<TripState> {
   DropoffMonitor? _dropoffMonitor;
   bool get hasDropoffMonitor => _dropoffMonitor != null;
 
-  /// Vibrates with [pattern] and [intensities] only if the device has a vibrator.
-  /// Silently skips on devices without hardware or API < 26 for intensities.
-  static Future<void> _vibrate({
-    required List<int> pattern,
-    required List<int> intensities,
-  }) async {
-    final hasVibrator = await Vibration.hasVibrator() ?? false;
-    if (!hasVibrator) return;
-    unawaited(Vibration.vibrate(pattern: pattern, intensities: intensities));
+  // Cached at trip start — avoids two platform-channel round-trips per alert.
+  bool _canVibrate = false;
+  bool _hasAmplitudeControl = false;
+
+  /// Initialises vibration capabilities once per trip session.
+  static Future<({bool canVibrate, bool hasAmplitude})> _queryVibrationCaps() async {
+    final canVibrate = (await Vibration.hasVibrator()) == true;
+    if (!canVibrate) return (canVibrate: false, hasAmplitude: false);
+    final hasAmplitude = (await Vibration.hasAmplitudeControl()) == true;
+    return (canVibrate: true, hasAmplitude: hasAmplitude);
+  }
+
+  /// Vibrates with [pattern]. Uses [intensities] only when the device supports
+  /// amplitude control (cached at trip start); falls back to plain pattern otherwise.
+  void _vibrate({required List<int> pattern, List<int>? intensities}) {
+    if (!_canVibrate) return;
+    if (intensities != null && _hasAmplitudeControl) {
+      unawaited(Vibration.vibrate(pattern: pattern, intensities: intensities));
+    } else {
+      unawaited(Vibration.vibrate(pattern: pattern));
+    }
   }
 
   /// Current dropoff destination coordinates, if a monitor is running.
@@ -68,8 +80,12 @@ class TripNotifier extends Notifier<TripState> {
 
   void Function(String message)? _onReportResolved;
   void Function(String message)? _onDeviationReEntry;
+  void Function()? _onReturnToRoute;
+  void Function()? _onForceCloseDesvioDialogs;
   Timer? _deviationReEntryTimer;
+  Timer? _desvioEscalateTimer;
   int? _deviationRouteId;
+  int? _desvioReportId; // ID of the active desvio report; resolved on return to route or trip end
 
   void setReportResolvedCallback(void Function(String message) cb) {
     _onReportResolved = cb;
@@ -77,6 +93,14 @@ class TripNotifier extends Notifier<TripState> {
 
   void setDeviationReEntryCallback(void Function(String message) cb) {
     _onDeviationReEntry = cb;
+  }
+
+  void setReturnToRouteCallback(void Function() cb) {
+    _onReturnToRoute = cb;
+  }
+
+  void setForceCloseDesvioDialogsCallback(void Function() cb) {
+    _onForceCloseDesvioDialogs = cb;
   }
 
   @override
@@ -117,6 +141,10 @@ class TripNotifier extends Notifier<TripState> {
     _occupancyCredited.clear();
 
     state = activeState;
+
+    final vibCaps = await _queryVibrationCaps();
+    _canVibrate = vibCaps.canVibrate;
+    _hasAmplitudeControl = vibCaps.hasAmplitude;
 
     ref.read(socketServiceProvider).joinRoute(routeId);
     _bindSocketRouteListeners(routeId);
@@ -254,6 +282,10 @@ class TripNotifier extends Notifier<TripState> {
 
     state = activeState;
 
+    final vibCaps = await _queryVibrationCaps();
+    _canVibrate = vibCaps.canVibrate;
+    _hasAmplitudeControl = vibCaps.hasAmplitude;
+
     ref.read(socketServiceProvider).joinRoute(routeId);
     _bindSocketRouteListeners(routeId);
     _startLocationBroadcast();
@@ -275,7 +307,13 @@ class TripNotifier extends Notifier<TripState> {
         : Duration.zero;
     final reportsCreated = _reportsCreatedThisTrip;
 
-    _disposeMonitorsAndTimers();
+    // Resolve any open desvio episode report — records its end at current location/time.
+    final desvioReportId = _desvioReportId;
+    if (desvioReportId != null) {
+      unawaited(ref.read(reportsRepositoryProvider).resolve(desvioReportId));
+    }
+
+    _disposeMonitorsAndTimers(); // clears _desvioReportId internally
     final socket = ref.read(socketServiceProvider);
     if (active.trip.routeId != null) {
       socket.leaveRoute(active.trip.routeId!);
@@ -332,10 +370,25 @@ class TripNotifier extends Notifier<TripState> {
     }
   }
 
-  void dismissDesvio() {
-    _desvioMonitor?.resetAlert();
+  /// Call when user actively responds to the desvio dialog.
+  /// [responseType] must be 'trancon' or 'ruta_real'.
+  void dismissDesvio(String responseType) {
+    _desvioMonitor?.confirmResponse(responseType);
     if (state is TripActive) {
       state = (state as TripActive).copyWith(desvioDetected: false);
+    }
+  }
+
+  /// Call when user confirms they are still on the bus after the 30-min escalation.
+  void dismissDesvioEscalate() {
+    _desvioEscalateTimer?.cancel();
+    _desvioEscalateTimer = null;
+    _desvioMonitor?.resetEpisode();
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(
+        showDesvioEscalate: false,
+        desvioEscalateIsTranscon: false,
+      );
     }
   }
 
@@ -519,10 +572,10 @@ class TripNotifier extends Notifier<TripState> {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.prepare);
         // Two medium pulses — noticeable but not panic-inducing.
-        unawaited(_vibrate(
+        _vibrate(
           pattern: [0, 200, 200, 200],
           intensities: [0, 180, 0, 180],
-        ));
+        );
         unawaited(NotificationService.showAlert(
           title: AppStrings.prepareToAlight,
           body: AppStrings.prepareToAlightBody,
@@ -533,10 +586,10 @@ class TripNotifier extends Notifier<TripState> {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.alight);
         // Five heavy pulses — urgent "get off now" feel.
-        unawaited(_vibrate(
+        _vibrate(
           pattern: [0, 400, 150, 400, 150, 400, 150, 400, 150, 400],
           intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
-        ));
+        );
         unawaited(NotificationService.showAlert(
           title: AppStrings.alightNow,
           body: AppStrings.alightNowBody,
@@ -590,8 +643,12 @@ class TripNotifier extends Notifier<TripState> {
     });
 
     switch (result) {
-      case Success<Report>():
+      case Success<Report>(data: final report):
         _reportsCreatedThisTrip++;
+        // Track the desvio report so it can be auto-resolved when bus returns to route.
+        if (type == 'desvio') {
+          _desvioReportId = report.id;
+        }
         if (isOccupancy) {
           _occupancyCooldownEnd = DateTime.now().add(const Duration(minutes: 10));
           _occupancyCredited.add(type);
@@ -771,20 +828,114 @@ class TripNotifier extends Notifier<TripState> {
     _desvioMonitor = DesvioMonitor(
       geometry: activeState.route.geometry,
       stops: activeState.stops,
-      onDesvio: () async {
-        // 5 strong pulses: [on, off, on, off, on, off, on, off, on] in ms
-        unawaited(_vibrate(
+      onDesvio: (bool isRepeat) async {
+        // 5 strong pulses — urgent deviation alert.
+        _vibrate(
           pattern: [0, 300, 150, 300, 150, 300, 150, 300, 150, 300],
           intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
-        ));
+        );
         unawaited(NotificationService.showAlert(
-          title: AppStrings.desvioTitle,
-          body: AppStrings.desvioBody,
+          title: isRepeat ? AppStrings.desvioRepeatTitle : AppStrings.desvioTitle,
+          body: isRepeat ? AppStrings.desvioRepeatBody : AppStrings.desvioBody,
           payload: 'desvio',
         ));
         if (state is TripActive) {
-          state = (state as TripActive).copyWith(desvioDetected: true);
+          state = (state as TripActive).copyWith(
+            desvioDetected: true,
+            desvioIsRepeat: isRepeat,
+          );
         }
+      },
+      onReturnToRoute: () {
+        // Bus is back on route — cancel escalation and clear all desvio UI state.
+        _desvioEscalateTimer?.cancel();
+        _desvioEscalateTimer = null;
+
+        if (state is TripActive) {
+          state = (state as TripActive).copyWith(
+            desvioDetected: false,
+            desvioIsRepeat: false,
+            showDesvioEscalate: false,
+            desvioEscalateIsTranscon: false,
+          );
+        }
+
+        // Close any open desvio or escalation dialogs still on screen.
+        _onForceCloseDesvioDialogs?.call();
+
+        // Auto-resolve the desvio report (records resolved_at = now as "end of episode").
+        final reportId = _desvioReportId;
+        if (reportId != null) {
+          _desvioReportId = null;
+          unawaited(_resolveReport(reportId));
+        }
+
+        // Notify screen + local notification.
+        _onReturnToRoute?.call();
+        unawaited(NotificationService.showAlert(
+          title: AppStrings.desvioReturnedTitle,
+          body: AppStrings.desvioReturnedBody,
+          payload: 'desvio_returned',
+        ));
+      },
+      onEscalate: (String? confirmedResponse) async {
+        // After 30 min continuously off-route — ask if user is still on bus.
+        // 'ruta_real' is suppressed in the monitor itself, so this only fires
+        // for 'trancon' (contextual message) or no prior response (generic).
+        final isTranscon = confirmedResponse == 'trancon';
+        _vibrate(
+          pattern: [0, 500, 200, 500, 200, 500],
+          intensities: [0, 255, 0, 255, 0, 255],
+        );
+        unawaited(NotificationService.showAlert(
+          title: isTranscon
+              ? AppStrings.desvioEscalateTransconTitle
+              : AppStrings.desvioEscalateTitle,
+          body: isTranscon
+              ? AppStrings.desvioEscalateTransconBody
+              : AppStrings.desvioEscalateBody,
+          payload: 'desvio_escalate',
+        ));
+        if (state is TripActive) {
+          // Clear any pending desvio dialog — escalation supersedes it.
+          state = (state as TripActive).copyWith(
+            showDesvioEscalate: true,
+            desvioEscalateIsTranscon: isTranscon,
+            desvioDetected: false,
+          );
+        }
+        // Auto-end after 2 min with no response + report ruta_real for admin review.
+        _desvioEscalateTimer?.cancel();
+        _desvioEscalateTimer = Timer(const Duration(minutes: 2), () async {
+          if (state is! TripActive) return;
+          final active = state as TripActive;
+          final routeId = active.route.id;
+
+          // Report ruta_real so admin can review the route.
+          Position? pos;
+          try {
+            pos = await Geolocator.getLastKnownPosition();
+          } catch (_) {}
+          pos ??= await LocationService.getCurrentPosition();
+          if (pos != null) {
+            unawaited(ref.read(routesRepositoryProvider).reportRouteUpdate(
+              routeId,
+              'ruta_real',
+              lat: pos.latitude,
+              lng: pos.longitude,
+            ));
+          }
+
+          if (state is TripActive) {
+            state = (state as TripActive).copyWith(showDesvioEscalate: false);
+          }
+          unawaited(NotificationService.showAlert(
+            title: AppStrings.desvioAutoEndTitle,
+            body: AppStrings.desvioAutoEndBody,
+            payload: 'desvio_auto_end',
+          ));
+          unawaited(endTrip());
+        });
       },
     )..start();
   }
@@ -829,6 +980,7 @@ class TripNotifier extends Notifier<TripState> {
 
     _desvioMonitor?.dispose();
     _desvioMonitor = null;
+    _desvioReportId = null;
   }
 
   void _disposeMonitorsAndTimers() {
@@ -841,6 +993,8 @@ class TripNotifier extends Notifier<TripState> {
     _deviationReEntryTimer?.cancel();
     _deviationReEntryTimer = null;
     _deviationRouteId = null;
+    _desvioEscalateTimer?.cancel();
+    _desvioEscalateTimer = null;
     _disposeMonitorsOnly();
   }
 }

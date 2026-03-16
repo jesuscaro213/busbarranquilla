@@ -32,6 +32,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   bool _suspiciousDialogShown = false;
+  bool _desvioEscalateDialogShown = false;
+  BuildContext? _activeDesvioDialogCtx;
+  BuildContext? _activeDesvioEscalateDialogCtx;
   bool _reportsExpanded = false;
   LatLng? _lastCenter;
   bool _autoFollow = true;
@@ -70,6 +73,21 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
       });
       notifier.setDeviationReEntryCallback((msg) {
         if (mounted) AppSnackbar.show(context, msg, SnackbarType.success);
+      });
+      notifier.setReturnToRouteCallback(() {
+        if (mounted) {
+          AppSnackbar.show(context, AppStrings.desvioReturnedTitle, SnackbarType.success);
+        }
+      });
+      notifier.setForceCloseDesvioDialogsCallback(() {
+        final desvioCtx = _activeDesvioDialogCtx;
+        if (desvioCtx != null && desvioCtx.mounted) {
+          Navigator.of(desvioCtx).pop();
+        }
+        final escalateCtx = _activeDesvioEscalateDialogCtx;
+        if (escalateCtx != null && escalateCtx.mounted) {
+          Navigator.of(escalateCtx).pop();
+        }
       });
       // The dropoff prompt may already be true when this screen first mounts
       // (state was set before navigation — ref.listen misses that transition).
@@ -324,80 +342,121 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     );
   }
 
-  void _showDesvioDialog() {
+  void _showDesvioDialog({required bool isRepeat}) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(AppStrings.desvioTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text(AppStrings.desvioBody,
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 16),
-            _DesvioOption(
-              icon: Icons.alt_route,
-              color: Colors.orange,
-              title: AppStrings.desvioTemporal,
-              subtitle: AppStrings.desvioTemporalDesc,
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                ref.read(tripNotifierProvider.notifier).dismissDesvio();
-                await ref.read(tripNotifierProvider.notifier).createReport('desvio');
-              },
-            ),
-            const SizedBox(height: 10),
-            _DesvioOption(
-              icon: Icons.map_outlined,
-              color: AppColors.error,
-              title: AppStrings.desvioRutaDiferente,
-              subtitle: AppStrings.desvioRutaDiferenteDesc,
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                ref.read(tripNotifierProvider.notifier).dismissDesvio();
-                final s = ref.read(tripNotifierProvider);
-                if (s is TripActive) {
-                  final messenger = ScaffoldMessenger.of(context);
-                  final result = await ref
-                      .read(tripNotifierProvider.notifier)
-                      .reportRutaReal(s.route.id, s.route.geometry);
-                  if (!mounted) return;
-                  _showRutaRealResult(messenger, result);
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      ref.read(tripNotifierProvider.notifier).ignoreDesvio();
-                    },
-                    icon: const Icon(Icons.snooze, size: 16),
-                    label: const Text(AppStrings.desvioIgnore),
+      builder: (ctx) {
+        _activeDesvioDialogCtx = ctx;
+        return AlertDialog(
+          title: Text(isRepeat ? AppStrings.desvioRepeatTitle : AppStrings.desvioTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                isRepeat ? AppStrings.desvioRepeatBody : AppStrings.desvioBody,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              _DesvioOption(
+                icon: Icons.alt_route,
+                color: Colors.orange,
+                title: AppStrings.desvioTemporal,
+                subtitle: AppStrings.desvioTemporalDesc,
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  ref.read(tripNotifierProvider.notifier).dismissDesvio('trancon');
+                  await ref.read(tripNotifierProvider.notifier).createReport('desvio');
+                },
+              ),
+              const SizedBox(height: 10),
+              _DesvioOption(
+                icon: Icons.map_outlined,
+                color: AppColors.error,
+                title: AppStrings.desvioRutaDiferente,
+                subtitle: AppStrings.desvioRutaDiferenteDesc,
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  ref.read(tripNotifierProvider.notifier).dismissDesvio('ruta_real');
+                  final s = ref.read(tripNotifierProvider);
+                  if (s is TripActive) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final result = await ref
+                        .read(tripNotifierProvider.notifier)
+                        .reportRutaReal(s.route.id, s.route.geometry);
+                    if (!mounted) return;
+                    _showRutaRealResult(messenger, result);
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        ref.read(tripNotifierProvider.notifier).ignoreDesvio();
+                      },
+                      icon: const Icon(Icons.snooze, size: 16),
+                      label: const Text(AppStrings.desvioIgnore),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      ref.read(tripNotifierProvider.notifier).endTrip();
-                    },
-                    icon: const Icon(Icons.logout, size: 16),
-                    label: const Text(AppStrings.desvioGetOff),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        ref.read(tripNotifierProvider.notifier).endTrip();
+                      },
+                      icon: const Icon(Icons.logout, size: 16),
+                      label: const Text(AppStrings.desvioGetOff),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) => _activeDesvioDialogCtx = null);
+  }
+
+  void _showDesvioEscalateDialog({required bool isTranscon}) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        _activeDesvioEscalateDialogCtx = ctx;
+        return AlertDialog(
+          title: Text(isTranscon
+              ? AppStrings.desvioEscalateTransconTitle
+              : AppStrings.desvioEscalateTitle),
+          content: Text(isTranscon
+              ? AppStrings.desvioEscalateTransconBody
+              : AppStrings.desvioEscalateBody),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ref.read(tripNotifierProvider.notifier).dismissDesvioEscalate();
+              },
+              child: const Text(AppStrings.stillOnBusYes),
+            ),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ref.read(tripNotifierProvider.notifier).endTrip();
+              },
+              icon: const Icon(Icons.logout, size: 16),
+              label: const Text(AppStrings.desvioGetOff),
             ),
           ],
-        ),
-      ),
-    );
+        );
+      },
+    ).then((_) => _activeDesvioEscalateDialogCtx = null);
   }
 
   String _dropoffMessage(DropoffAlert alert) => switch (alert) {
@@ -448,8 +507,19 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
         WidgetsBinding.instance.addPostFrameCallback((_) => _showInactivityDialog());
       }
       if (next.desvioDetected && prev?.desvioDetected != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _showDesvioDialog());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _showDesvioDialog(isRepeat: next.desvioIsRepeat),
+        );
       }
+      if (next.showDesvioEscalate && prev?.showDesvioEscalate != true) {
+        if (!_desvioEscalateDialogShown) {
+          _desvioEscalateDialogShown = true;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _showDesvioEscalateDialog(isTranscon: next.desvioEscalateIsTranscon),
+          );
+        }
+      }
+      if (!next.showDesvioEscalate) _desvioEscalateDialogShown = false;
       if (next.dropoffPrompt && prev?.dropoffPrompt != true) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _showDropoffPrompt());
       }

@@ -94,6 +94,8 @@ abstract final class AppStrings {
   static const stillOnBusYes = 'Sí, sigo aquí';
   static const desvioTitle = 'El bus se alejó de la ruta';
   static const desvioBody = '¿Qué está pasando?';
+  static const desvioRepeatTitle = 'Sigues fuera de la ruta';
+  static const desvioRepeatBody = '¿Ya resolviste el desvío o te bajaste?';
   static const desvioTemporal = 'Desvío temporal (trancón)';
   static const desvioTemporalDesc = 'El bus tomó un atajo por tráfico. Es temporal.';
   static const desvioRutaDiferente = 'La ruta del bus es diferente al mapa';
@@ -103,6 +105,14 @@ abstract final class AppStrings {
   static const desvioRutaRealSent = 'Reporte enviado. Monitoreando re-ingreso a la ruta...';
   static const desvioRutaRealOnRoute = 'Estás sobre la ruta registrada, el reporte no aplica';
   static const desvioRutaRealReEntry = '✓ Segmento desactualizado registrado. ¡Gracias!';
+  static const desvioEscalateTitle = 'Llevas 30 min fuera de la ruta';
+  static const desvioEscalateBody = '¿Sigues en el bus?';
+  static const desvioEscalateTransconTitle = '¿El trancón continúa?';
+  static const desvioEscalateTransconBody = 'Llevas 30 min en el desvío. ¿Sigues a bordo del bus?';
+  static const desvioAutoEndTitle = 'Viaje cerrado — sin respuesta';
+  static const desvioAutoEndBody = 'No respondiste al alerta de desvío. Tu viaje fue cerrado automáticamente.';
+  static const desvioReturnedTitle = '¡El bus retomó la ruta!';
+  static const desvioReturnedBody = 'El desvío ha sido cerrado automáticamente.';
 
   static const premiumTitle = 'MiBus Premium';
   static const premiumAlready = '✓ Ya eres Premium';

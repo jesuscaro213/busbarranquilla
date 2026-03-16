@@ -25,6 +25,9 @@ final class TripActive extends TripState {
   final DropoffAlert? dropoffAlert;
   final bool showInactivityModal;
   final bool desvioDetected;
+  final bool desvioIsRepeat;
+  final bool showDesvioEscalate;
+  final bool desvioEscalateIsTranscon;
   final bool dropoffPrompt;
   final bool showSuspiciousModal;
   final String? reportError;
@@ -39,6 +42,9 @@ final class TripActive extends TripState {
     this.dropoffAlert,
     this.showInactivityModal = false,
     this.desvioDetected = false,
+    this.desvioIsRepeat = false,
+    this.showDesvioEscalate = false,
+    this.desvioEscalateIsTranscon = false,
     this.dropoffPrompt = false,
     this.showSuspiciousModal = false,
     this.reportError,
@@ -55,6 +61,9 @@ final class TripActive extends TripState {
     bool clearDropoffAlert = false,
     bool? showInactivityModal,
     bool? desvioDetected,
+    bool? desvioIsRepeat,
+    bool? showDesvioEscalate,
+    bool? desvioEscalateIsTranscon,
     bool? dropoffPrompt,
     bool? showSuspiciousModal,
     String? reportError,
@@ -71,6 +80,9 @@ final class TripActive extends TripState {
       dropoffAlert: clearDropoffAlert ? null : (dropoffAlert ?? this.dropoffAlert),
       showInactivityModal: showInactivityModal ?? this.showInactivityModal,
       desvioDetected: desvioDetected ?? this.desvioDetected,
+      desvioIsRepeat: desvioIsRepeat ?? this.desvioIsRepeat,
+      showDesvioEscalate: showDesvioEscalate ?? this.showDesvioEscalate,
+      desvioEscalateIsTranscon: desvioEscalateIsTranscon ?? this.desvioEscalateIsTranscon,
       dropoffPrompt: dropoffPrompt ?? this.dropoffPrompt,
       showSuspiciousModal: showSuspiciousModal ?? this.showSuspiciousModal,
       reportError: clearReportError ? null : (reportError ?? this.reportError),

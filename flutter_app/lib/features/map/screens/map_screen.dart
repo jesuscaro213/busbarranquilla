@@ -309,7 +309,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
       if (distFromStart >= 100) {
         _cogiOtroShown = true;
-        if (mounted) _showCogiotroDialog(route, userPos);
+        if (mounted) {
+          unawaited(_vibrateWaitingAlert());
+          _showCogiotroDialog(route, userPos);
+        }
         return;
       }
 
@@ -675,7 +678,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Future<void> _vibrateWaitingAlert() async {
-    final hasVibrator = (await Vibration.hasVibrator()) == true;
+    final hasVibrator = (await Vibration.hasVibrator()) != false;
     if (!hasVibrator) return;
     // Two short pulses: bzzz-pause-bzzz
     await Vibration.vibrate(pattern: <int>[0, 400, 200, 400]);

@@ -47,7 +47,9 @@ class TripNotifier extends Notifier<TripState> {
 
   /// Initialises vibration capabilities once per trip session.
   static Future<({bool canVibrate, bool hasAmplitude})> _queryVibrationCaps() async {
-    final canVibrate = (await Vibration.hasVibrator()) == true;
+    // Treat null as "assume yes" — some Android devices return null instead of
+    // true even when a vibrator is present. Explicitly false means no vibrator.
+    final canVibrate = (await Vibration.hasVibrator()) != false;
     if (!canVibrate) return (canVibrate: false, hasAmplitude: false);
     final hasAmplitude = (await Vibration.hasAmplitudeControl()) == true;
     return (canVibrate: true, hasAmplitude: hasAmplitude);
@@ -1009,6 +1011,11 @@ class TripNotifier extends Notifier<TripState> {
       onConfirmDeviating: () {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(desvioConfirmPending: true);
+        // 3 medium pulses — "still on a different route?" reminder.
+        _vibrate(
+          pattern: [0, 300, 150, 300, 150, 300],
+          intensities: [0, 200, 0, 200, 0, 200],
+        );
         _desvioConfirmTimer?.cancel();
         _desvioConfirmTimer = Timer(const Duration(seconds: 60), () {
           _desvioMonitor?.acknowledgeConfirmation();

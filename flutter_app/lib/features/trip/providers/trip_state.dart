@@ -27,6 +27,7 @@ final class TripActive extends TripState {
   final bool desvioDetected;
   final bool desvioIsRepeat;
   final bool showDesvioEscalate;
+  final bool desvioConfirmPending;
   final bool desvioEscalateIsTranscon;
   final bool dropoffPrompt;
   /// When true the screen skips the payment-confirmation dialog and goes
@@ -50,6 +51,7 @@ final class TripActive extends TripState {
     this.desvioDetected = false,
     this.desvioIsRepeat = false,
     this.showDesvioEscalate = false,
+    this.desvioConfirmPending = false,
     this.desvioEscalateIsTranscon = false,
     this.dropoffPrompt = false,
     this.dropoffAutoPickDestination = false,
@@ -71,6 +73,7 @@ final class TripActive extends TripState {
     bool? desvioDetected,
     bool? desvioIsRepeat,
     bool? showDesvioEscalate,
+    bool? desvioConfirmPending,
     bool? desvioEscalateIsTranscon,
     bool? dropoffPrompt,
     bool? dropoffAutoPickDestination,
@@ -93,6 +96,7 @@ final class TripActive extends TripState {
       desvioDetected: desvioDetected ?? this.desvioDetected,
       desvioIsRepeat: desvioIsRepeat ?? this.desvioIsRepeat,
       showDesvioEscalate: showDesvioEscalate ?? this.showDesvioEscalate,
+      desvioConfirmPending: desvioConfirmPending ?? this.desvioConfirmPending,
       desvioEscalateIsTranscon: desvioEscalateIsTranscon ?? this.desvioEscalateIsTranscon,
       dropoffPrompt: dropoffPrompt ?? this.dropoffPrompt,
       dropoffAutoPickDestination: dropoffAutoPickDestination ?? this.dropoffAutoPickDestination,

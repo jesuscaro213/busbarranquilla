@@ -23,13 +23,25 @@ class DesvioMonitor {
   /// Called when the bus re-enters the route after a confirmed off-route episode.
   final VoidCallback? onReturnToRoute;
 
+  /// Optional OSRM nearest-road resolver. When provided, readings in the
+  /// 20–100 m gray zone are confirmed by snapping the GPS to the road network
+  /// and re-measuring against the registered polyline.
+  final Future<LatLng?> Function(double lat, double lng)? osrmNearest;
+
+  /// Called every 10 min when the user has already confirmed 'ruta_real' and
+  /// the GPS is still off-route. No push notification is sent — only in-app UI.
+  final VoidCallback? onConfirmDeviating;
+
+  static const Duration _confirmInterval = Duration(minutes: 10);
+  DateTime? _lastConfirmAt;
+
   static const Duration _repeatDelay  = Duration(minutes: 5);
   static const Duration escalateAfter = Duration(minutes: 30);
 
   Timer? _timer;
   Timer? _ignoreTimer;
 
-  DateTime? _offRouteAt;     // when bus first crossed the 50m threshold
+  DateTime? _offRouteAt;     // when bus first crossed the on-route threshold
   DateTime? _episodeStartAt; // set once when episode is confirmed (30s sustained)
   DateTime? _lastAlertAt;    // when we last fired onDesvio
 
@@ -37,6 +49,12 @@ class DesvioMonitor {
   bool    _userConfirmed     = false; // user picked trancon or ruta_real
   String? _confirmedResponse;         // 'trancon' | 'ruta_real' | null
   bool    _escalated         = false;
+  bool _reverseInFlight = false;
+
+  // distance constants
+  static const double _kOnRouteMax  = 20.0;  // clearly on route
+  static const double _kGrayZoneMax = 100.0; // upper bound of gray zone
+  static const double _kSnapOnRoute = 20.0;  // snapped point ≤ 20 m → correct street
 
   DesvioMonitor({
     required this.geometry,
@@ -44,6 +62,8 @@ class DesvioMonitor {
     required this.onDesvio,
     required this.onEscalate,
     this.onReturnToRoute,
+    this.osrmNearest,
+    this.onConfirmDeviating,
   });
 
   void start() {
@@ -75,9 +95,16 @@ class DesvioMonitor {
     _offRouteAt        = null;
     _episodeStartAt    = null;
     _lastAlertAt       = null;
+    _lastConfirmAt     = null;
     _userConfirmed     = false;
     _confirmedResponse = null;
     _escalated         = false;
+  }
+
+  /// Call when user taps "Sí, sigo en ruta diferente" in the confirmation sheet.
+  /// Resets the 10-min interval without clearing the episode.
+  void acknowledgeConfirmation() {
+    _lastConfirmAt = DateTime.now();
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -102,76 +129,119 @@ class DesvioMonitor {
     );
   }
 
+  double _minDistToGeometry(double pLat, double pLng) {
+    if (geometry.length >= 2) {
+      double best = double.infinity;
+      for (int i = 0; i < geometry.length - 1; i++) {
+        final d = _distToSegmentMeters(
+          pLat, pLng,
+          geometry[i].latitude, geometry[i].longitude,
+          geometry[i + 1].latitude, geometry[i + 1].longitude,
+        );
+        if (d < best) best = d;
+      }
+      return best;
+    }
+    return stops.fold<double>(double.infinity, (b, s) {
+      final d = LocationService.distanceMeters(pLat, pLng, s.latitude, s.longitude);
+      return d < b ? d : b;
+    });
+  }
+
   Future<void> _check() async {
     if (_ignored) return;
 
     final pos = await LocationService.getCurrentPosition();
     if (pos == null) return;
 
-    double minDist;
+    final rawDist = _minDistToGeometry(pos.latitude, pos.longitude);
 
-    if (geometry.length >= 2) {
-      minDist = double.infinity;
-      for (int i = 0; i < geometry.length - 1; i++) {
-        final d = _distToSegmentMeters(
-          pos.latitude, pos.longitude,
-          geometry[i].latitude, geometry[i].longitude,
-          geometry[i + 1].latitude, geometry[i + 1].longitude,
-        );
-        if (d < minDist) minDist = d;
-      }
-    } else if (stops.isNotEmpty) {
-      minDist = stops.fold<double>(double.infinity, (best, stop) {
-        final d = LocationService.distanceMeters(
-          pos.latitude, pos.longitude, stop.latitude, stop.longitude,
-        );
-        return d < best ? d : best;
-      });
-    } else {
-      return; // no geometry or stops — can't evaluate
-    }
-
-    if (minDist > 50) {
-      _offRouteAt ??= DateTime.now();
-      final offSeconds = DateTime.now().difference(_offRouteAt!).inSeconds;
-      if (offSeconds < 30) return; // not sustained yet
-
-      // Episode confirmed — mark start time once.
-      _episodeStartAt ??= DateTime.now();
-
-      // ── Escalation check (30 min continuously off-route) ──
-      if (!_escalated &&
-          DateTime.now().difference(_episodeStartAt!) >= escalateAfter) {
-        _escalated = true;
-        // 'ruta_real' users already know and reported — don't escalate.
-        if (_confirmedResponse != 'ruta_real') {
-          onEscalate(_confirmedResponse); // null or 'trancon'
-        }
-        return;
-      }
-      if (_escalated) return;
-
-      // ── Re-alert only if user hasn't responded yet ──
-      // Once the user confirms (trancon/ruta_real), we trust their input and
-      // stop re-alerting — only the 30-min escalation matters after that.
-      if (_userConfirmed) return;
-
-      final isRepeat = _lastAlertAt != null;
-      final shouldAlert = _lastAlertAt == null ||
-          DateTime.now().difference(_lastAlertAt!) >= _repeatDelay;
-
-      if (shouldAlert) {
-        _lastAlertAt = DateTime.now();
-        onDesvio(isRepeat);
-      }
-    } else {
-      // Back on route — notify only if there was a confirmed episode.
-      // Skip for 'ruta_real': the deviation re-entry timer handles that case
-      // and notifying here would cause duplicate snackbars/notifications.
+    // ── 1. Clearly on route ──────────────────────────────────────────────────
+    if (rawDist <= _kOnRouteMax) {
       if (_episodeStartAt != null && _confirmedResponse != 'ruta_real') {
         onReturnToRoute?.call();
       }
       resetEpisode();
+      return;
+    }
+
+    // ── 2. Determine if genuinely off-route ──────────────────────────────────
+    bool isOffRoute;
+
+    if (rawDist <= _kGrayZoneMax && osrmNearest != null) {
+      // Gray zone (20–100 m): snap GPS to road network and re-measure.
+      // Skip if a previous snap is still in flight.
+      if (_reverseInFlight) return;
+      _reverseInFlight = true;
+      try {
+        final snapped = await osrmNearest!(pos.latitude, pos.longitude);
+        if (snapped == null) {
+          // Network error — assume off-route to avoid suppressing real deviations.
+          isOffRoute = true;
+        } else {
+          final snapDist = _minDistToGeometry(snapped.latitude, snapped.longitude);
+          // If the road-snapped point is close to the registered polyline, the
+          // GPS is on the correct street (just offset by GPS error). Not a deviation.
+          isOffRoute = snapDist > _kSnapOnRoute;
+        }
+      } finally {
+        _reverseInFlight = false;
+      }
+    } else {
+      // rawDist > 100 m → clearly off route; no OSRM call needed.
+      // Also the fallback when osrmNearest is not provided.
+      isOffRoute = true;
+    }
+
+    // ── 3. On-route confirmed by OSRM snap ───────────────────────────────────
+    if (!isOffRoute) {
+      if (_episodeStartAt != null && _confirmedResponse != 'ruta_real') {
+        onReturnToRoute?.call();
+      }
+      resetEpisode();
+      return;
+    }
+
+    // ── 4. Off-route: start / continue episode ───────────────────────────────
+    _offRouteAt ??= DateTime.now();
+    final offSeconds = DateTime.now().difference(_offRouteAt!).inSeconds;
+    if (offSeconds < 15) return; // not sustained yet
+
+    // Episode confirmed — mark start time once.
+    _episodeStartAt ??= DateTime.now();
+
+    // ── Escalation check (30 min continuously off-route) ──
+    if (!_escalated &&
+        DateTime.now().difference(_episodeStartAt!) >= escalateAfter) {
+      _escalated = true;
+      if (_confirmedResponse != 'ruta_real') {
+        onEscalate(_confirmedResponse);
+      }
+      return;
+    }
+    if (_escalated) return;
+
+    // ── After ruta_real confirmation: periodic check instead of re-alert ──
+    if (_confirmedResponse == 'ruta_real') {
+      final shouldConfirm = _lastConfirmAt == null ||
+          DateTime.now().difference(_lastConfirmAt!) >= _confirmInterval;
+      if (shouldConfirm) {
+        _lastConfirmAt = DateTime.now();
+        onConfirmDeviating?.call();
+      }
+      return;
+    }
+
+    // ── Re-alert only if user hasn't responded yet (trancon or no response) ──
+    if (_userConfirmed) return;
+
+    final isRepeat = _lastAlertAt != null;
+    final shouldAlert = _lastAlertAt == null ||
+        DateTime.now().difference(_lastAlertAt!) >= _repeatDelay;
+
+    if (shouldAlert) {
+      _lastAlertAt = DateTime.now();
+      onDesvio(isRepeat);
     }
   }
 

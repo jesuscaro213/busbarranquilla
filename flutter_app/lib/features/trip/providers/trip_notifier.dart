@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vibration/vibration.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/data/repositories/credits_repository.dart';
 import '../../../core/data/repositories/reports_repository.dart';
 import '../../../core/data/repositories/routes_repository.dart';
@@ -69,6 +72,28 @@ class TripNotifier extends Notifier<TripState> {
     return LatLng(dest.latitude, dest.longitude);
   }
 
+  Future<LatLng?> _osrmNearest(double lat, double lng) async {
+    try {
+      final dio = ref.read(dioProvider);
+      final resp = await dio.get<String>(
+        'https://router.project-osrm.org/nearest/v1/driving/$lng,$lat',
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+      if (resp.statusCode != 200 || resp.data == null) return null;
+      final body = jsonDecode(resp.data!) as Map<String, dynamic>;
+      final waypoints = body['waypoints'] as List?;
+      if (waypoints == null || waypoints.isEmpty) return null;
+      final loc = (waypoints.first as Map<String, dynamic>)['location'] as List;
+      return LatLng((loc[1] as num).toDouble(), (loc[0] as num).toDouble());
+    } catch (_) {
+      return null;
+    }
+  }
+
   InactivityMonitor? _inactivityMonitor;
   AutoResolveMonitor? _autoResolveMonitor;
   DesvioMonitor? _desvioMonitor;
@@ -85,6 +110,7 @@ class TripNotifier extends Notifier<TripState> {
   void Function()? _onForceCloseDesvioDialogs;
   Timer? _deviationReEntryTimer;
   Timer? _desvioEscalateTimer;
+  Timer? _desvioConfirmTimer;
   int? _deviationRouteId;
   int? _desvioReportId; // ID of the active desvio report; resolved on return to route or trip end
 
@@ -394,6 +420,29 @@ class TripNotifier extends Notifier<TripState> {
     _desvioMonitor?.confirmResponse(responseType);
     if (state is TripActive) {
       state = (state as TripActive).copyWith(desvioDetected: false);
+    }
+  }
+
+  /// User tapped "Sí, sigo en ruta diferente" in the confirmation sheet.
+  void acknowledgeDesvioConfirm() {
+    _desvioConfirmTimer?.cancel();
+    _desvioConfirmTimer = null;
+    _desvioMonitor?.acknowledgeConfirmation();
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(desvioConfirmPending: false);
+    }
+  }
+
+  /// User tapped "El bus ya regresó a la ruta" in the confirmation sheet.
+  void resetDesvioConfirm() {
+    _desvioConfirmTimer?.cancel();
+    _desvioConfirmTimer = null;
+    _desvioMonitor?.resetEpisode();
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(
+        desvioConfirmPending: false,
+        desvioDetected: false,
+      );
     }
   }
 
@@ -924,6 +973,8 @@ class TripNotifier extends Notifier<TripState> {
         // Bus is back on route — cancel escalation and clear all desvio UI state.
         _desvioEscalateTimer?.cancel();
         _desvioEscalateTimer = null;
+        _desvioConfirmTimer?.cancel();
+        _desvioConfirmTimer = null;
 
         if (state is TripActive) {
           state = (state as TripActive).copyWith(
@@ -931,6 +982,7 @@ class TripNotifier extends Notifier<TripState> {
             desvioIsRepeat: false,
             showDesvioEscalate: false,
             desvioEscalateIsTranscon: false,
+            desvioConfirmPending: false,
           );
         }
 
@@ -951,6 +1003,18 @@ class TripNotifier extends Notifier<TripState> {
           body: AppStrings.desvioReturnedBody,
           payload: 'desvio_returned',
         ));
+      },
+      osrmNearest: _osrmNearest,
+      onConfirmDeviating: () {
+        if (state is! TripActive) return;
+        state = (state as TripActive).copyWith(desvioConfirmPending: true);
+        _desvioConfirmTimer?.cancel();
+        _desvioConfirmTimer = Timer(const Duration(seconds: 60), () {
+          _desvioMonitor?.acknowledgeConfirmation();
+          if (state is TripActive) {
+            state = (state as TripActive).copyWith(desvioConfirmPending: false);
+          }
+        });
       },
       onEscalate: (String? confirmedResponse) async {
         // After 30 min continuously off-route — ask if user is still on bus.
@@ -1069,6 +1133,8 @@ class TripNotifier extends Notifier<TripState> {
     _deviationRouteId = null;
     _desvioEscalateTimer?.cancel();
     _desvioEscalateTimer = null;
+    _desvioConfirmTimer?.cancel();
+    _desvioConfirmTimer = null;
     _disposeMonitorsOnly();
   }
 }

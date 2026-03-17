@@ -467,6 +467,35 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     ).then((_) => _activeDesvioEscalateDialogCtx = null);
   }
 
+  void _showDesvioConfirmSheet() {
+    AppBottomSheet.show<void>(
+      context,
+      title: AppStrings.desvioConfirmTitle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const Text(AppStrings.desvioConfirmBody),
+          const SizedBox(height: 16),
+          AppButton.primary(
+            label: AppStrings.desvioConfirmYes,
+            onPressed: () {
+              context.pop();
+              ref.read(tripNotifierProvider.notifier).acknowledgeDesvioConfirm();
+            },
+          ),
+          const SizedBox(height: 8),
+          AppButton.secondary(
+            label: AppStrings.desvioConfirmNo,
+            onPressed: () {
+              context.pop();
+              ref.read(tripNotifierProvider.notifier).resetDesvioConfirm();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   String _dropoffMessage(DropoffAlert alert) => switch (alert) {
         DropoffAlert.prepare => AppStrings.prepareToAlight,
         DropoffAlert.alight => AppStrings.alightNow,
@@ -564,6 +593,14 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
             _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
           }
         });
+      }
+    });
+
+    ref.listen<TripState>(tripNotifierProvider, (prev, next) {
+      if (next is! TripActive) return;
+      final wasConfirm = prev is TripActive && prev.desvioConfirmPending;
+      if (!wasConfirm && next.desvioConfirmPending) {
+        _showDesvioConfirmSheet();
       }
     });
 

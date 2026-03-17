@@ -112,6 +112,11 @@ abstract final class AppStrings {
   static const desvioAutoEndBody = 'No respondiste al alerta de desvío. Tu viaje fue cerrado automáticamente.';
   static const desvioReturnedTitle = '¡El bus retomó la ruta!';
   static const desvioReturnedBody = 'El desvío ha sido cerrado automáticamente.';
+  static const desvioConfirmTitle = '¿Sigues en ruta diferente?';
+  static const desvioConfirmBody =
+      'Reportaste que el bus está tomando una ruta distinta al mapa. ¿Sigue así?';
+  static const desvioConfirmYes = 'Sí, sigue en ruta diferente';
+  static const desvioConfirmNo = 'No, ya regresó a la ruta';
 
   static const premiumTitle = 'MiBus Premium';
   static const premiumAlready = '✓ Ya eres Premium';

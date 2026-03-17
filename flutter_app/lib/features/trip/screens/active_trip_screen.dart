@@ -1226,6 +1226,30 @@ class _TripSummaryScreen extends StatelessWidget {
                       subtitle: ended.streakDays >= 7 ? '¡Bonus de +30 cr activo!' : null,
                     ),
 
+                    if (ended.deviationDetected) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange.shade300),
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Icon(Icons.alt_route, color: Colors.orange.shade700, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                AppStrings.deviationReportBody,
+                                style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     if (!ended.completionBonusEarned && ended.distanceMeters < 2000) ...<Widget>[
                       const SizedBox(height: 12),
                       Container(

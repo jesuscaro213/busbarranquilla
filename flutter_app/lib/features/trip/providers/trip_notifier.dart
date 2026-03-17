@@ -389,6 +389,7 @@ class TripNotifier extends Notifier<TripState> {
           tripDuration: duration,
           reportsCreated: reportsCreated,
           streakDays: streakDays,
+          deviationDetected: data.deviationDetected,
         );
       case Failure<TripEndResult>():
         state = const TripIdle();

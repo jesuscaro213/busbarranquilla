@@ -390,4 +390,9 @@ abstract final class AppStrings {
   static const helpTripTitle = 'Cómo funciona "Tomar bus"';
   static const helpCreditsTitle = 'Sistema de créditos';
   static const helpPremiumTitle = 'MiBus Premium';
+
+  // Deviation report — trip summary
+  static const deviationReportBody =
+      'El recorrido del bus fue diferente al trazado registrado. '
+      'Se generó un reporte automático para mejorar el mapa.';
 }

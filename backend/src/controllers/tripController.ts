@@ -6,6 +6,40 @@ import { sendPushToUser } from '../services/pushNotificationService';
 
 const MAX_TRIP_LOCATION_CREDITS = 15; // máx créditos por ubicación en un viaje (~15 min activos)
 
+function minDistToGeometryKm(lat: number, lng: number, geometry: [number, number][]): number {
+  let min = Infinity;
+  for (const [gLat, gLng] of geometry) {
+    const d = haversineMeters(lat, lng, gLat, gLng) / 1000;
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+function centroid(points: [number, number][]): [number, number] | null {
+  if (points.length === 0) return null;
+  const lat = points.reduce((s, p) => s + p[0], 0) / points.length;
+  const lng = points.reduce((s, p) => s + p[1], 0) / points.length;
+  return [lat, lng];
+}
+
+function findOffRouteClusters(
+  trace: [number, number][],
+  geometry: [number, number][]
+): [number, number][][] {
+  const clusters: [number, number][][] = [];
+  let current: [number, number][] = [];
+  for (const point of trace) {
+    if (minDistToGeometryKm(point[0], point[1], geometry) > 0.2) {
+      current.push(point);
+    } else {
+      if (current.length >= 3) clusters.push(current);
+      current = [];
+    }
+  }
+  if (current.length >= 3) clusters.push(current);
+  return clusters;
+}
+
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -142,6 +176,16 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
     // Acumular distancia total siempre (independiente del timer de créditos)
     const totalDistance = parseFloat(trip.total_distance_meters ?? '0') + distanceDelta;
 
+    await pool.query(
+      `UPDATE active_trips
+       SET gps_trace = CASE
+         WHEN jsonb_array_length(gps_trace) >= 500 THEN gps_trace
+         ELSE gps_trace || jsonb_build_array(jsonb_build_array($1::float, $2::float))
+       END
+       WHERE id = $3`,
+      [latitude, longitude, trip.id]
+    );
+
     const updated = await pool.query(
       `UPDATE active_trips
        SET current_latitude = $1,
@@ -223,6 +267,56 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
 
     const totalEarned = finalCredits + completionBonus + uncreditedRes.rows.length;
 
+    const trace: [number, number][] = Array.isArray(trip.gps_trace) ? trip.gps_trace : [];
+    let deviationDetected = false;
+    const gpsTrace: [number, number][] = trace;
+
+    if (trip.route_id && trace.length >= 5) {
+      const routeRes = await pool.query(
+        'SELECT geometry FROM routes WHERE id = $1',
+        [trip.route_id]
+      );
+      const geometry: [number, number][] = routeRes.rows[0]?.geometry ?? [];
+
+      if (geometry.length >= 2) {
+        const existingRes = await pool.query(
+          `SELECT reported_geometry FROM route_update_reports
+           WHERE user_id = $1 AND route_id = $2 AND tipo = 'ruta_real' AND created_at >= $3`,
+          [userId, trip.route_id, trip.started_at]
+        );
+
+        const existingCentroids: [number, number][] = existingRes.rows
+          .map((r: { reported_geometry: unknown }) => {
+            const pts: [number, number][] = Array.isArray(r.reported_geometry)
+              ? (r.reported_geometry as [number, number][])
+              : [];
+            return centroid(pts);
+          })
+          .filter((c): c is [number, number] => c !== null);
+
+        if (existingCentroids.length > 0) deviationDetected = true;
+
+        const clusters = findOffRouteClusters(trace, geometry);
+
+        for (const cluster of clusters) {
+          const clusterCenter = centroid(cluster);
+          if (!clusterCenter) continue;
+
+          const alreadyReported = existingCentroids.some(
+            (c) => haversineMeters(clusterCenter[0], clusterCenter[1], c[0], c[1]) < 500
+          );
+          if (alreadyReported) continue;
+
+          deviationDetected = true;
+          await pool.query(
+            `INSERT INTO route_update_reports (route_id, user_id, tipo, reported_geometry)
+             VALUES ($1, $2, 'ruta_real', $3)`,
+            [trip.route_id, userId, JSON.stringify(cluster)]
+          );
+        }
+      }
+    }
+
     const updated = await pool.query(
       `UPDATE active_trips
        SET is_active = false, ended_at = NOW(), credits_earned = $2
@@ -257,6 +351,8 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
       totalCreditsEarned: updated.rows[0].credits_earned,
       distance_meters: Math.round(tripDistanceMeters),
       completion_bonus_earned: completionBonus > 0,
+      deviation_detected: deviationDetected,
+      gps_trace: deviationDetected ? gpsTrace : [],
     });
 
   } catch (error) {

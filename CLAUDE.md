@@ -652,6 +652,7 @@ Specs are numbered markdown files describing feature implementations for Codex:
 | 36 | Alertas inteligentes modo espera — M4 on-route lento (dialog "¿Ya te subiste?") + M5 off-route lento (dialog "¿Sigues esperando?") + QuickBoardSheet ("cogí otro bus") |
 | 39 | DesvioMonitor mejorado — zona gris 20–100m con OSRM snap, umbral 30m, sostenido 15s; confirmación periódica post-ruta_real cada 10min (onConfirmDeviating + desvioConfirmPending) |
 | 40 | Waiting mode cogiotro — elimina M2/M4, reemplaza con check 100m → dialog "¿Cogiste otro bus?"; timer 15s; reset de ancla al decir "No"; ícono destino → Icons.where_to_vote |
+| 41 | Auto-reporte ruta diferente al cerrar viaje — `gps_trace` en `active_trips`, detección por clústeres en `endTrip`, eliminación de UNIQUE(route_id,user_id) en `route_update_reports`; card naranja en resumen de viaje (sin mapa, solo texto de confirmación) |
 
 **When writing new specs for Codex:**
 - Reference existing file paths and widget/class names exactly
@@ -677,8 +678,8 @@ Specs are numbered markdown files describing feature implementations for Codex:
 `manually_edited_at` is set to `NOW()` when admin edits a route via `PUT /api/routes/:id`. Cleared to `NULL` when `POST /api/routes/:id/regenerate-geometry` runs. Used by import system to skip manually-edited routes.
 
 ### route_update_reports
-`id, route_id (→ routes CASCADE), user_id (→ users CASCADE), tipo VARCHAR(20) CHECK ('trancon'|'ruta_real'), created_at` — `UNIQUE(route_id, user_id)`
-User votes that the bus route has changed or is stuck. ≥3 `ruta_real` votes trigger an admin alert.
+`id, route_id (→ routes CASCADE), user_id (→ users CASCADE), tipo VARCHAR(20) CHECK ('trancon'|'ruta_real'), created_at`
+`UNIQUE(route_id, user_id)` **eliminada** (Spec 41) — permite múltiples tramos por usuario por ruta. ≥3 `ruta_real` votes trigger an admin alert. Auto-inserts from `endTrip` use cluster-based dedup (centroid ±500m).
 
 ### stops
 `id, route_id, name, latitude, longitude, stop_order, created_at`

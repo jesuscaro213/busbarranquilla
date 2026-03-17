@@ -924,4 +924,25 @@ _autoboardPending, _autoboardUndoTimer
 
 **FAB mapa:** `AppStrings.mapBoardFab = 'Tomar bus'` (antes `boardedButton = 'Me subí'`). `boardedButton` se conserva para el botón de confirmación en `BoardingConfirmScreen`. `helpTripTitle` actualizado a `'Cómo funciona "Tomar bus"'`.
 
-*Última actualización: 2026-03-17 (v31)*
+---
+
+### Auto-reporte de ruta diferente al finalizar viaje (Spec 41)
+
+**Backend — acumulación de traza GPS:**
+- Nueva columna `active_trips.gps_trace JSONB DEFAULT '[]'` — acumula los puntos GPS del viaje
+- `updateLocation` hace append de `[lat, lng]` a `gps_trace` en cada actualización (máx 500 puntos)
+- Constraint `UNIQUE(route_id, user_id)` eliminada de `route_update_reports` — permite múltiples tramos por usuario por ruta
+
+**Backend — detección al cerrar viaje (`endTrip`):**
+- Helpers añadidos: `minDistToGeometryKm`, `centroid`, `findOffRouteClusters`
+- `findOffRouteClusters` divide la traza en clústeres de puntos consecutivos >200 m de la ruta (mínimo 3 puntos)
+- Por cada clúster: calcula centroide, compara contra centroides de reportes manuales del usuario durante ese viaje (tolerancia 500 m). Si no hay overlap → inserta nuevo `route_update_reports` (tipo `ruta_real`) para ese tramo
+- `endTrip` response incluye `deviation_detected: bool` (el `gps_trace` ya no se retorna al cliente)
+
+**Flutter — resumen de viaje:**
+- `TripEndResult`: campo `deviationDetected: bool`
+- `TripEnded`: campo `deviationDetected: bool`
+- `_TripSummaryScreen`: si `deviationDetected`, muestra card naranja con texto `deviationReportBody` e ícono `alt_route`. Sin mapa — el usuario solo necesita saber que se registró, no ver el trazado técnico
+- String: `AppStrings.deviationReportBody`
+
+*Última actualización: 2026-03-17 (v32)*

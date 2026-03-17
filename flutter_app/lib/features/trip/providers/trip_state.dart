@@ -123,6 +123,7 @@ final class TripEnded extends TripState {
   final Duration tripDuration;
   final int reportsCreated;
   final int streakDays;
+  final bool deviationDetected;
 
   const TripEnded({
     required this.routeName,
@@ -132,5 +133,6 @@ final class TripEnded extends TripState {
     required this.tripDuration,
     this.reportsCreated = 0,
     this.streakDays = 0,
+    this.deviationDetected = false,
   });
 }

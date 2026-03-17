@@ -302,6 +302,12 @@ const createTables = async () => {
     await pool.query(`ALTER TABLE active_trips ADD COLUMN IF NOT EXISTS custom_destination_lat DECIMAL(10,8) DEFAULT NULL`);
     await pool.query(`ALTER TABLE active_trips ADD COLUMN IF NOT EXISTS custom_destination_lng DECIMAL(11,8) DEFAULT NULL`);
     await pool.query(`ALTER TABLE active_trips ADD COLUMN IF NOT EXISTS custom_destination_name TEXT DEFAULT NULL`);
+    await pool.query(`ALTER TABLE active_trips ADD COLUMN IF NOT EXISTS gps_trace JSONB DEFAULT '[]'`);
+
+    await pool.query(`
+      ALTER TABLE route_update_reports
+        DROP CONSTRAINT IF EXISTS route_update_reports_route_id_user_id_key
+    `);
     console.log('✅ Columnas custom_destination en active_trips');
 
     // Cerrar viajes zombie (activos por más de 4 horas sin actualización de ubicación)

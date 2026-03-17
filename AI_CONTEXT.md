@@ -479,6 +479,13 @@ La lista `buses` del socket incluye el propio viaje del usuario. Para evitar dos
 1. `BusMarkerLayer` recibe `otherBuses` (filtrando el `trip.id` propio)
 2. `UserMarkerLayer` usa la posición del bus propio desde la lista (actualizada por socket), NO `ready.userPosition` (que es la posición inicial del mapa — se vuelve obsoleta)
 
+**Marcadores de bus — colores y widgets (NO usar `en_transito.png`):**
+- `UserMarkerLayer` sin viaje: punto azul (`AppColors.primary`) con borde blanco
+- `UserMarkerLayer` en viaje (`isOnTrip=true`): círculo verde (`AppColors.success`) + `Icons.directions_bus_filled` blanco, 44×44
+- `BusMarkerLayer` (otros usuarios): círculo ámbar (`AppColors.accent`) + `Icons.directions_bus_filled` blanco, 44×44
+- Posiciones activas en `map_screen.dart` (planificador/waiting): círculo ámbar (`AppColors.accent`) + `Icons.directions_bus_filled` blanco, 40×40
+- Splash screen bus animado: círculo verde (`AppColors.success`) + `Icons.directions_bus_filled` blanco, 80×80
+
 ```dart
 // map_screen.dart
 int? ownTripId;
@@ -686,7 +693,7 @@ Vibration.vibrate(
 | `assets/icon/icon.png` | Icono de app (launcher) |
 | `assets/icon/logo.png` | Logo circular MiBus (500×500, fondo transparente) — usado en login screen |
 | `assets/splash/bus.png` | Bus MiBus ilustración (500×500, fondo transparente) — logo central del splash screen |
-| `assets/splash/en_transito.png` | Bus MiBus en tránsito con líneas de velocidad (500×500, fondo transparente) — bus animado en splash + marcadores de buses en el mapa |
+| `assets/splash/en_transito.png` | ~~Ya no se usa~~ — reemplazado por widgets Flutter con `Icons.directions_bus_filled` |
 
 ---
 
@@ -964,4 +971,4 @@ _autoboardPending, _autoboardUndoTimer
 - `_TripSummaryScreen`: si `deviationDetected`, muestra card naranja con texto `deviationReportBody` e ícono `alt_route`. Sin mapa — el usuario solo necesita saber que se registró, no ver el trazado técnico
 - String: `AppStrings.deviationReportBody`
 
-*Última actualización: 2026-03-17 (v33)*
+*Última actualización: 2026-03-17 (v34)*

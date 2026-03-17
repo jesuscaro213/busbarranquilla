@@ -917,7 +917,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       point: pos,
                       width: 40,
                       height: 40,
-                      child: Image.asset('assets/splash/en_transito.png', width: 40, height: 40),
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: const BoxDecoration(
+                          color: AppColors.accent,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.directions_bus_filled, color: Colors.white, size: 24),
+                      ),
                     )).toList(),
                   );
                 },

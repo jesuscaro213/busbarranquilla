@@ -187,10 +187,14 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text(AppStrings.tabRoutes)),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: <Widget>[
+        child: Column(
+          children: <Widget>[
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -405,6 +409,10 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                                 ),
                                 FilledButton.icon(
                                   onPressed: () => context.push('/trip/confirm?routeId=${route.id}'),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.success,
+                                    foregroundColor: Colors.white,
+                                  ),
                                   icon: const Icon(Icons.directions_bus, size: 16),
                                   label: const Text(AppStrings.nearbyBoardButton),
                                 ),
@@ -417,62 +425,73 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 12),
-              AppButton.primary(
+              switch (state) {
+                PlannerLoading() => const Padding(
+                    padding: EdgeInsets.only(top: 40),
+                    child: LoadingIndicator(),
+                  ),
+                PlannerError(message: final message) => Padding(
+                    padding: const EdgeInsets.only(top: 40),
+                    child: Center(child: Text(message)),
+                  ),
+                PlannerResults() => results.isEmpty
+                    ? const EmptyView(
+                        icon: Icons.alt_route,
+                        message: AppStrings.emptyState,
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: results.length,
+                        itemBuilder: (context, index) {
+                          final result = results[index];
+                          return PlanResultCard(
+                            result: result,
+                            onSelect: () {
+                              unawaited(_updateActivePositions(result.id));
+                              // Pass the user's actual typed destination, not the
+                              // boarding stop (nearestStop). BoardingConfirmScreen
+                              // uses these coords to pre-select the nearest dropoff
+                              // stop and show the final destination pin on the map.
+                              final dest = ref
+                                  .read(plannerNotifierProvider.notifier)
+                                  .selectedDest;
+                              final destParam = dest != null
+                                  ? '&destLat=${dest.lat}&destLng=${dest.lng}'
+                                  : '';
+                              context.push(
+                                '/trip/confirm?routeId=${result.id}$destParam',
+                              );
+                            },
+                            onWait: () => _startWaiting(
+                              BusRoute(
+                                id: result.id,
+                                name: result.name,
+                                code: result.code,
+                                company: result.companyName,
+                                isActive: true,
+                                geometry: result.geometry,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                _ => const SizedBox.shrink(),
+              },
+              const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: AppButton.primary(
                 label: AppStrings.planButton,
                 isLoading: isLoading,
                 onPressed: isLoading ? null : _onSearch,
               ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: switch (state) {
-                  PlannerLoading() => const LoadingIndicator(),
-                  PlannerError(message: final message) => Center(child: Text(message)),
-                  PlannerResults() => results.isEmpty
-                      ? const EmptyView(
-                          icon: Icons.alt_route,
-                          message: AppStrings.emptyState,
-                        )
-                      : ListView.builder(
-                          itemCount: results.length,
-                          itemBuilder: (context, index) {
-                            final result = results[index];
-                            return PlanResultCard(
-                              result: result,
-                              onSelect: () {
-                                unawaited(_updateActivePositions(result.id));
-                                // Pass the user's actual typed destination, not the
-                                // boarding stop (nearestStop). BoardingConfirmScreen
-                                // uses these coords to pre-select the nearest dropoff
-                                // stop and show the final destination pin on the map.
-                                final dest = ref
-                                    .read(plannerNotifierProvider.notifier)
-                                    .selectedDest;
-                                final destParam = dest != null
-                                    ? '&destLat=${dest.lat}&destLng=${dest.lng}'
-                                    : '';
-                                context.push(
-                                  '/trip/confirm?routeId=${result.id}$destParam',
-                                );
-                              },
-                              onWait: () => _startWaiting(
-                                BusRoute(
-                                  id: result.id,
-                                  name: result.name,
-                                  code: result.code,
-                                  company: result.companyName,
-                                  isActive: true,
-                                  geometry: result.geometry,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                  _ => const SizedBox.shrink(),
-                },
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

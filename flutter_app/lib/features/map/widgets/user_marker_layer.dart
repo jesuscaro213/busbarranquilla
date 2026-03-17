@@ -23,7 +23,15 @@ class UserMarkerLayer extends StatelessWidget {
           width: isOnTrip ? 44 : 20,
           height: isOnTrip ? 44 : 20,
           child: isOnTrip
-              ? Image.asset('assets/splash/en_transito.png', width: 44, height: 44)
+              ? Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: AppColors.success,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.directions_bus_filled, color: Colors.white, size: 26),
+                )
               : Container(
                   decoration: BoxDecoration(
                     color: AppColors.primary,

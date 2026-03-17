@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/domain/models/active_trip.dart';
 import '../../../core/l10n/strings.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_bottom_sheet.dart';
 
 class BusMarkerLayer extends StatelessWidget {
@@ -43,7 +44,15 @@ class BusMarkerLayer extends StatelessWidget {
                     child: Text('$passengerCount ${AppStrings.passengersLabel}'),
                   );
                 },
-                child: Image.asset('assets/splash/en_transito.png', width: 44, height: 44),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: AppColors.accent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.directions_bus_filled, color: Colors.white, size: 26),
+                ),
               ),
             );
           })

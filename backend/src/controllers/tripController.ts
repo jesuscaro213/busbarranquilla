@@ -372,7 +372,7 @@ export const endTrip = async (req: Request, res: Response): Promise<void> => {
 
     // Bonus de completación solo si el usuario recorrió ≥2 km (anti-ciclo rápido)
     const tripDistanceMeters = parseFloat(trip.total_distance_meters ?? '0');
-    const completionBonus = tripDistanceMeters >= 2000 ? 5 : 0;
+    const completionBonus = tripDistanceMeters >= 2000 ? 3 : 0;
     if (completionBonus > 0) {
       await awardCredits(userId, completionBonus, 'earn', 'Viaje completado');
     }

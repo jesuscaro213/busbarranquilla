@@ -697,7 +697,7 @@ Specs are numbered markdown files describing feature implementations for Codex:
 
 ### active_trips
 `id, user_id, route_id, current_latitude, current_longitude, destination_stop_id, started_at, last_location_at, ended_at, credits_earned, is_active`
-**Migrations added:** `total_distance_meters DECIMAL(10,2) DEFAULT 0` — accumulated on every `updateLocation` call via Haversine; used to gate the +5 completion bonus (requires ≥2 km). `gps_trace JSONB DEFAULT '[]'` — max 500 GPS points, used for cluster-based deviation detection in `endTrip`. `boarding_alert_prepare_sent BOOLEAN DEFAULT FALSE` + `boarding_alert_now_sent BOOLEAN DEFAULT FALSE` — prevent duplicate boarding alert pushes (400 m / 200 m) from `updateLocation`.
+**Migrations added:** `total_distance_meters DECIMAL(10,2) DEFAULT 0` — accumulated on every `updateLocation` call via Haversine; used to gate the +3 completion bonus (requires ≥2 km). `gps_trace JSONB DEFAULT '[]'` — max 500 GPS points, used for cluster-based deviation detection in `endTrip`. `boarding_alert_prepare_sent BOOLEAN DEFAULT FALSE` + `boarding_alert_now_sent BOOLEAN DEFAULT FALSE` — prevent duplicate boarding alert pushes (400 m / 200 m) from `updateLocation`.
 
 ### user_favorite_routes
 `id, user_id (→ users), route_id (→ routes), created_at` — `UNIQUE(user_id, route_id)`
@@ -780,10 +780,10 @@ Specs are numbered markdown files describing feature implementations for Codex:
 | Confirm another user's report | +1 | Max 2 per trip; confirmer must have active trip on same route |
 | Report no service | +4 | |
 | Invite a friend | +25 | |
-| 7-day reporting streak | +30 | |
+| 7-day reporting streak | +15 | |
 | Welcome bonus (registration) | +50 | |
 | Per minute transmitting bus location | +1 | Max 15 credits per trip from location (speed check: must move >100m/30s) |
-| Complete full trip | +5 | |
+| Complete full trip | +3 | Requires ≥2 km |
 
 **Occupancy report rules:**
 - Only two states: `lleno` (🔴 Bus lleno) and `bus_disponible` (🟢 Hay sillas)

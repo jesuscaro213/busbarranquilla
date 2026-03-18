@@ -259,7 +259,7 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
 
     // Solo premiar cuando la racha avanza respecto a ayer (evita duplicar bonus en el mismo día)
     if (lastReportDate === yesterday && newStreak > 0 && newStreak % 7 === 0) {
-      await awardCredits(userId, 30, 'streak', `🔥 ¡Racha de ${newStreak} días! Bonus de créditos`);
+      await awardCredits(userId, 15, 'streak', `🔥 ¡Racha de ${newStreak} días! Bonus de créditos`);
     }
 
     // ── Emitir evento en tiempo real a los demás usuarios de la ruta ─────

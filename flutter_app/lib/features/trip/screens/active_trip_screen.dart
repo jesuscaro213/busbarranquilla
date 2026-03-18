@@ -1289,7 +1289,7 @@ class _TripSummaryScreen extends StatelessWidget {
                           : ended.streakDays > 0
                               ? Colors.orange
                               : Colors.grey,
-                      subtitle: ended.streakDays >= 7 ? '¡Bonus de +30 cr activo!' : null,
+                      subtitle: ended.streakDays >= 7 ? '¡Bonus de +15 cr activo!' : null,
                     ),
 
                     if (ended.deviationDetected) ...<Widget>[

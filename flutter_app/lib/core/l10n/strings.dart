@@ -155,7 +155,7 @@ abstract final class AppStrings {
 
   // Trip summary — distance + bonus
   static const tripDistanceLabel = 'Distancia';
-  static const tripCompletionBonus = '+5 créditos por completar el viaje';
+  static const tripCompletionBonus = '+3 créditos por completar el viaje';
   static const tripShortDistance = 'Recorriste menos de 2 km — no se otorgó el bonus de completación';
   static const tripKmSuffix = 'km';
   static const tripMetersSuffix = 'm';

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'core/notifications/notification_service.dart';
 
+import 'core/data/repositories/auth_repository.dart';
 import 'core/l10n/strings.dart';
 import 'core/storage/onboarding_storage.dart' show onboardingDoneProvider;
 import 'core/theme/app_theme.dart';
@@ -202,6 +203,11 @@ class _MiBusAppState extends ConsumerState<MiBusApp> {
     NotificationService.onNotificationTap = _handleLocalNotificationTap;
     NotificationService.getLaunchPayload().then((payload) {
       if (payload != null) _handleLocalNotificationTap(payload);
+    });
+
+    // Keep backend FCM token in sync when Android rotates it.
+    NotificationService.listenTokenRefresh((newToken) {
+      ref.read(authRepositoryProvider).updateFcmToken(newToken);
     });
   }
 

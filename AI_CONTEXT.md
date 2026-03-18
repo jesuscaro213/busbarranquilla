@@ -1168,4 +1168,19 @@ Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean e
 
 **Strings nuevos:** `waitingBusCount0/1/N`, `waitingAlertButton`, `waitingAlertActive`, `waitingAlertActivating`, `waitingAlertInsufficientCredits`, `waitingAlertCost`
 
-*Última actualización: 2026-03-18 (v42)*
+## FCM token refresh (Spec 51) ✅ Implementado
+
+**Problema resuelto:** Android rota el FCM token periódicamente. Sin listener, el backend quedaba con el token viejo y las pushes llegaban a un token inválido (silenciado en `pushNotificationService.ts`).
+
+**`lib/core/notifications/notification_service.dart`:** método estático `listenTokenRefresh(void Function(String) onRefresh)` — suscribe a `FirebaseMessaging.instance.onTokenRefresh`.
+
+**`lib/app.dart`:** `_MiBusAppState.initState()` llama `NotificationService.listenTokenRefresh()` con callback que invoca `ref.read(authRepositoryProvider).updateFcmToken(newToken)`.
+
+**Sistema de pushes completo:**
+- Token guardado en backend al login vía `AuthNotifier._registerFcmToken()` ✅
+- Token actualizado cuando Android lo rota vía `onTokenRefresh` ✅
+- Backend envía pushes con `notification + data` → Android muestra nativamente con app cerrada ✅
+- `getInitialMessage()` + `onMessageOpenedApp` en `app.dart` routean al destino correcto ✅
+- **Prerequisito producción:** variable `FIREBASE_SERVICE_ACCOUNT` debe estar configurada en Railway con el JSON de la service account de Firebase Admin SDK
+
+*Última actualización: 2026-03-18 (v43)*

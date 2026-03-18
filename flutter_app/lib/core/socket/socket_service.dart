@@ -12,6 +12,10 @@ class SocketService {
   io.Socket? _socket;
   bool _connected = false;
 
+  /// Called every time the socket successfully reconnects after a drop.
+  /// Set by TripNotifier to re-join the active route room.
+  void Function()? onReconnect;
+
   bool get isConnected => _connected;
 
   void connect(String token) {
@@ -29,17 +33,23 @@ class SocketService {
 
     _socket?.onConnect((_) => _connected = true);
     _socket?.onDisconnect((_) => _connected = false);
+    _socket?.on('reconnect', (_) {
+      _connected = true;
+      onReconnect?.call();
+    });
   }
 
   void disconnect() {
     _socket?.disconnect();
     _connected = false;
+    onReconnect = null;
   }
 
   void dispose() {
     _socket?.dispose();
     _socket = null;
     _connected = false;
+    onReconnect = null;
   }
 
   void emit(String event, dynamic data) {

@@ -320,6 +320,9 @@ class TripNotifier extends Notifier<TripState> {
     ref.read(socketServiceProvider).joinRoute(routeId);
     _bindSocketRouteListeners(routeId);
     _startLocationBroadcast();
+    ref.read(socketServiceProvider).onReconnect = () {
+      ref.read(socketServiceProvider).joinRoute(routeId);
+    };
     _startMonitors(activeState, destinationStopId);
     if (destinationStopId == null) {
       _noDestTimer = Timer(const Duration(minutes: 4), () {
@@ -1194,6 +1197,7 @@ class TripNotifier extends Notifier<TripState> {
     _desvioConfirmTimer = null;
     _noDestTimer?.cancel();
     _noDestTimer = null;
+    ref.read(socketServiceProvider).onReconnect = null;
     _disposeMonitorsOnly();
   }
 }

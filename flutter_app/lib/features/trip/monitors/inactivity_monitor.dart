@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -9,11 +10,12 @@ class InactivityMonitor {
   final VoidCallback onAsk;
   final VoidCallback onSuspicious;
   final VoidCallback onAutoEnd;
+  final Future<Position?> Function()? positionGetter;
 
   Timer? _timer;
   Timer? _autoEndTimer;
   Position? _lastPosition;
-  DateTime _lastMoveAt = DateTime.now();
+  DateTime _lastMoveAt = clock.now();
   bool _asked = false;
   bool _hasBeenWarned = false;
 
@@ -21,6 +23,7 @@ class InactivityMonitor {
     required this.onAsk,
     required this.onSuspicious,
     required this.onAutoEnd,
+    this.positionGetter,
   });
 
   void start() {
@@ -32,11 +35,13 @@ class InactivityMonitor {
     _asked = false;
     _hasBeenWarned = true;
     _autoEndTimer?.cancel();
-    _lastMoveAt = DateTime.now();
+    _lastMoveAt = clock.now();
   }
 
   Future<void> _check() async {
-    final pos = await LocationService.getCurrentPosition();
+    final pos = positionGetter != null
+        ? await positionGetter!()
+        : await LocationService.getCurrentPosition();
     if (pos == null) return;
 
     if (_lastPosition != null) {
@@ -47,19 +52,20 @@ class InactivityMonitor {
         pos.longitude,
       );
       if (movedMeters > 50) {
-        _lastMoveAt = DateTime.now();
+        _lastMoveAt = clock.now();
         _asked = false;
         _autoEndTimer?.cancel();
       }
-    } else {
-      _lastMoveAt = DateTime.now();
     }
 
     _lastPosition = pos;
 
-    final inactiveSeconds = DateTime.now().difference(_lastMoveAt).inSeconds;
+    final inactiveSeconds = clock.now().difference(_lastMoveAt).inSeconds;
 
     if (inactiveSeconds >= 1800) {
+      if (!_hasBeenWarned) {
+        _asked = false;
+      }
       if (!_asked) {
         _asked = true;
         onSuspicious();
@@ -72,9 +78,9 @@ class InactivityMonitor {
         }
       } else if (!_asked) {
         _asked = true;
-        onAsk();
         _autoEndTimer?.cancel();
         _autoEndTimer = Timer(const Duration(seconds: 120), onAutoEnd);
+        onAsk();
       }
     }
   }

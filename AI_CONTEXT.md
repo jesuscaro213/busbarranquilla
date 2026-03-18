@@ -1088,4 +1088,34 @@ if (!await store.manage.ready) await store.manage.create();
 - `lib/features/map/screens/map_pick_screen.dart`
 - `lib/features/trip/widgets/route_preview_sheet.dart`
 
-*Última actualización: 2026-03-18 (v38)*
+---
+
+## Unit tests (Spec 47)
+
+**Dev dependencies agregadas:** `fake_async: ^1.3.1`, `clock` (para `clock.now()` en `InactivityMonitor` — necesario para que `fake_async` avance el tiempo correctamente).
+
+**Cambios en monitores para testabilidad:**
+- `InactivityMonitor` — constructor acepta `positionGetter` opcional; usa `clock.now()` en vez de `DateTime.now()`
+- `DropoffMonitor` — constructor acepta `positionGetter` opcional; `_routeDistanceMeters` renombrado a `routeDistanceMeters` (package-visible)
+
+**Test files:**
+- `test/location_service_test.dart` — 4 tests para `distanceMeters()` (Haversine)
+- `test/inactivity_monitor_test.dart` — 5 tests: onAsk a 600s, sin disparo si hay movimiento, onAutoEnd a 120s, markResponded cancela timer, onSuspicious a 1800s
+- `test/dropoff_monitor_test.dart` — tests para `routeDistanceMeters`: direct distance con 1 stop, cumulative con 3 stops, usuario pasado del destino
+
+**Estado:** todos los tests pasan, 0 analyze issues.
+
+## Socket reconnection (Spec 48) ✅ Implementado
+
+**`lib/core/socket/socket_service.dart`:**
+- Campo `void Function()? onReconnect` — setter público
+- `_socket?.on('reconnect', (_) { _connected = true; onReconnect?.call(); })` en `connect()`
+- `onReconnect = null` en `disconnect()` y `dispose()` — sin handlers huérfanos
+
+**`lib/features/trip/providers/trip_notifier.dart`:**
+- En `startTrip()`, tras `_startLocationBroadcast()`: registra `onReconnect` que emite `join:route` con el `routeId` activo
+- En `_disposeMonitorsAndTimers()`: limpia `onReconnect = null`
+
+**Comportamiento:** señal perdida → socket_io_client reconecta automáticamente → evento `'reconnect'` → re-join de la sala de ruta → reportes y confirmaciones en tiempo real continúan sin reiniciar la app.
+
+*Última actualización: 2026-03-18 (v40)*

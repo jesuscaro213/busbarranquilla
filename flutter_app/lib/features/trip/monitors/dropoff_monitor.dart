@@ -12,6 +12,7 @@ class DropoffMonitor {
   final VoidCallback onPrepare;
   final VoidCallback onAlight;
   final VoidCallback onMissed;
+  final Future<Position?> Function()? positionGetter;
 
   Timer? _timer;
   bool _prepared = false;
@@ -25,6 +26,7 @@ class DropoffMonitor {
     required this.onPrepare,
     required this.onAlight,
     required this.onMissed,
+    this.positionGetter,
   });
 
   void start() {
@@ -35,11 +37,13 @@ class DropoffMonitor {
   Future<void> _check() async {
     // Use last known position (instant, no GPS request) since the trip's
     // location stream already keeps the OS GPS cache fresh.
-    final pos = await Geolocator.getLastKnownPosition() ??
-        await LocationService.getCurrentPosition();
+    final pos = positionGetter != null
+        ? await positionGetter!()
+        : (await Geolocator.getLastKnownPosition() ??
+            await LocationService.getCurrentPosition());
     if (pos == null) return;
 
-    final dist = _routeDistanceMeters(pos.latitude, pos.longitude);
+    final dist = routeDistanceMeters(pos.latitude, pos.longitude);
 
     if (!_prepared && dist <= 700) {
       _prepared = true;
@@ -59,7 +63,8 @@ class DropoffMonitor {
     _prevDistMeters = dist;
   }
 
-  double _routeDistanceMeters(double userLat, double userLng) {
+  // @visibleForTesting
+  double routeDistanceMeters(double userLat, double userLng) {
     if (allStops.length < 2) {
       return LocationService.distanceMeters(
         userLat, userLng, destination.latitude, destination.longitude,

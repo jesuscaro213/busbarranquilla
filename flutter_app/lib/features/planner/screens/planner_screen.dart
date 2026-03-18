@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/analytics/analytics_service.dart';
 import '../../../core/data/repositories/routes_repository.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/plan_result.dart';
@@ -115,6 +116,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
       return;
     }
 
+    unawaited(AnalyticsService.plannerSearched());
     await notifier.planRoute(
       originLat: origin?.lat,
       originLng: origin?.lng,

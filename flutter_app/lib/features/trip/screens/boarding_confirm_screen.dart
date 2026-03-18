@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../../../core/data/repositories/stops_repository.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/report.dart';
 import '../../../core/domain/models/stop.dart';
+import '../../../core/analytics/analytics_service.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
@@ -70,6 +72,7 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(AnalyticsService.routeSelected(widget.routeId, ''));
     Future<void>(() => _load());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

@@ -32,6 +32,8 @@ abstract final class ApiPaths {
   static const tripHistory = '/api/trips/history';
 
   static String routeActivity(int id) => '/api/routes/$id/activity';
+  static String routeNearbyBuses(int id) => '/api/routes/$id/nearby-buses';
+  static String routeWaitingAlert(int id) => '/api/routes/$id/waiting-alert';
   static String reportsOccupancy(int routeId) => '/api/reports/occupancy/$routeId';
 
   static const creditsBalance = '/api/credits/balance';

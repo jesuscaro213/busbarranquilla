@@ -25,6 +25,13 @@ class AppButton extends StatelessWidget {
     super.key,
   }) : _variant = _ButtonVariant.secondary;
 
+  const AppButton.outlined({
+    required this.label,
+    this.onPressed,
+    this.isLoading = false,
+    super.key,
+  }) : _variant = _ButtonVariant.secondary;
+
   const AppButton.destructive({
     required this.label,
     this.onPressed,

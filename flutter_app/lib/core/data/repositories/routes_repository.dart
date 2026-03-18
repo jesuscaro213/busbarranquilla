@@ -99,6 +99,50 @@ class RoutesRepository {
     }
   }
 
+  Future<Result<int>> getNearbyBusCount({
+    required int routeId,
+    required double userLat,
+    required double userLng,
+  }) async {
+    try {
+      final count = await _source.getNearbyBusCount(
+        routeId: routeId,
+        userLat: userLat,
+        userLng: userLng,
+      );
+      return Success<int>(count);
+    } on DioException catch (e) {
+      return Failure<int>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<int>(UnknownError());
+    }
+  }
+
+  Future<Result<void>> subscribeWaitingAlert({
+    required int routeId,
+    required double userLat,
+    required double userLng,
+  }) async {
+    try {
+      await _source.subscribeWaitingAlert(
+        routeId: routeId,
+        userLat: userLat,
+        userLng: userLng,
+      );
+      return const Success(null);
+    } on DioException catch (e) {
+      return Failure<void>(mappedErrorFromDio(e));
+    } catch (_) {
+      return const Failure<void>(UnknownError());
+    }
+  }
+
+  Future<void> unsubscribeWaitingAlert(int routeId) async {
+    try {
+      await _source.unsubscribeWaitingAlert(routeId);
+    } catch (_) {}
+  }
+
   /// Returns `(onRoute: true)` when the backend rejects because user is on the route.
   Future<({bool onRoute, bool ok})> reportRouteUpdate(
     int routeId,

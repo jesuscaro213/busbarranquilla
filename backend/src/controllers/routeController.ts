@@ -399,13 +399,23 @@ export const getActiveFeed = async (_req: Request, res: Response): Promise<void>
 };
 
 // Haversine distance in km between two lat/lng points
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2
     + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function findNearestIdx(geometry: [number, number][], lat: number, lng: number): number {
+  let minDist = Infinity;
+  let idx = 0;
+  for (let i = 0; i < geometry.length; i++) {
+    const d = haversineKm(lat, lng, geometry[i][0], geometry[i][1]);
+    if (d < minDist) { minDist = d; idx = i; }
+  }
+  return idx;
 }
 
 // Minimum distance in km from a point to any point along a polyline
@@ -778,4 +788,49 @@ export const searchRoute = async (req: Request, res: Response): Promise<void> =>
     console.error('Error buscando rutas:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
+};
+
+// GET /api/routes/:id/nearby-buses?userLat=X&userLng=Y&radiusKm=2
+export const getNearbyBuses = async (req: Request, res: Response): Promise<void> => {
+  const routeId = parseInt(req.params.id, 10);
+  const userLat = parseFloat(req.query.userLat as string);
+  const userLng = parseFloat(req.query.userLng as string);
+  const radiusKm = parseFloat((req.query.radiusKm as string) ?? '2');
+
+  if (isNaN(userLat) || isNaN(userLng)) {
+    res.status(400).json({ error: 'userLat and userLng required' });
+    return;
+  }
+
+  const routeResult = await pool.query(
+    'SELECT geometry FROM routes WHERE id = $1',
+    [routeId],
+  );
+  const geometry: [number, number][] | null = routeResult.rows[0]?.geometry ?? null;
+
+  const tripsResult = await pool.query(
+    `SELECT current_latitude, current_longitude
+     FROM active_trips
+     WHERE route_id = $1 AND is_active = true
+       AND last_location_at > NOW() - INTERVAL '5 minutes'`,
+    [routeId],
+  );
+
+  const userIdx = geometry ? findNearestIdx(geometry, userLat, userLng) : -1;
+
+  let count = 0;
+  for (const row of tripsResult.rows) {
+    const busLat = parseFloat(row.current_latitude);
+    const busLng = parseFloat(row.current_longitude);
+    const distKm = haversineKm(userLat, userLng, busLat, busLng);
+    if (distKm > radiusKm) continue;
+
+    if (geometry && userIdx > 0) {
+      const busIdx = findNearestIdx(geometry, busLat, busLng);
+      if (busIdx >= userIdx) continue; // already passed or behind
+    }
+    count++;
+  }
+
+  res.json({ count });
 };

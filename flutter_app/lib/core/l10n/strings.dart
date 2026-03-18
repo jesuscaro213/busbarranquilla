@@ -402,4 +402,13 @@ abstract final class AppStrings {
   static const deviationReportBody =
       'El recorrido del bus fue diferente al trazado registrado. '
       'Se generó un reporte automático para mejorar el mapa.';
+
+  static const waitingBusCount0 = 'Sin buses en camino';
+  static const waitingBusCount1 = '1 bus en camino';
+  static String waitingBusCountN(int n) => '$n buses en camino';
+  static const waitingAlertButton = 'Avisarme cuando llegue';
+  static const waitingAlertActive = 'Te avisaremos cuando llegue';
+  static const waitingAlertActivating = 'Activando alerta…';
+  static const waitingAlertInsufficientCredits = 'Necesitas 3 créditos para activar la alerta';
+  static const waitingAlertCost = '3 créditos';
 }

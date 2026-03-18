@@ -115,6 +115,23 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla active_trips creada');
 
+    // Tabla de alertas de espera de bus (modo espera)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waiting_alerts (
+        id            SERIAL PRIMARY KEY,
+        user_id       INTEGER REFERENCES users(id)   ON DELETE CASCADE,
+        route_id      INTEGER REFERENCES routes(id)  ON DELETE CASCADE,
+        user_lat      DECIMAL(10,8) NOT NULL,
+        user_lng      DECIMAL(11,8) NOT NULL,
+        is_active     BOOLEAN DEFAULT TRUE,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        expires_at    TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 minutes'
+      );
+      CREATE INDEX IF NOT EXISTS idx_waiting_alerts_route
+        ON waiting_alerts(route_id) WHERE is_active = TRUE;
+    `);
+    console.log('✅ Tabla waiting_alerts creada');
+
     // Migraciones seguras para campos nuevos en tabla users
     await pool.query(`
       ALTER TABLE users
@@ -326,6 +343,10 @@ const createTables = async () => {
     if (zombieClosed.rowCount && zombieClosed.rowCount > 0) {
       console.log(`🧹 ${zombieClosed.rowCount} viaje(s) zombie cerrados automáticamente`);
     }
+    await pool.query(`
+      UPDATE waiting_alerts SET is_active = false
+      WHERE is_active = true AND expires_at < NOW()
+    `);
 
     // Seed automático de usuario admin (debe correr después de todas las migraciones)
     const adminCheck = await pool.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);

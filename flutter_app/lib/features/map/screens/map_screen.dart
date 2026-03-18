@@ -14,6 +14,8 @@ import '../../../core/data/repositories/routes_repository.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/notification_prefs.dart';
 import '../../../core/domain/models/route_activity.dart';
+import '../../../core/analytics/analytics_service.dart';
+import '../../../core/error/app_error.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/notifications/notification_service.dart';
@@ -21,6 +23,8 @@ import '../../../core/location/location_service.dart';
 import '../../../core/socket/socket_service.dart';
 import '../../../core/storage/secure_storage.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/app_snackbar.dart';
@@ -57,6 +61,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _livePosition;
   bool _followUser = true;
+  BusRoute? _waitingRoute;
+  int _nearbyBusCount = 0;
+  bool _alertActive = false;
+  bool _alertLoading = false;
+  Timer? _busCountTimer;
 
   // Waiting mode state
   Timer? _waitingPollTimer;
@@ -140,6 +149,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _waitingPollTimer?.cancel();
     _autoboardUndoTimer?.cancel();
     _gpsMovementTimer?.cancel();
+    _busCountTimer?.cancel();
     _positionSubscription?.cancel();
     _mapController.dispose();
     super.dispose();
@@ -149,11 +159,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   void _startWaiting(BusRoute route) {
     _waitingPollTimer?.cancel();
+    _busCountTimer?.cancel();
+    _busCountTimer = null;
     setState(() {
+      _waitingRoute = route;
       _waitingPolled = false;
       _waitingEtaMinutes = null;
       _waitingDistanceM = null;
       _waitingBusNearNotified = false;
+      _nearbyBusCount = 0;
+      _alertActive = false;
+      _alertLoading = false;
     });
     _socketBusPositions.clear();
 
@@ -168,6 +184,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // Switch to a background-capable position stream so the GPS movement timers
     // (M1–M5) keep firing even when the user locks the screen while waiting.
     _startPositionStream(background: true);
+    _startBusCountPolling(route.id);
 
     // Initial fetch + fallback poll every 60s (catches socket gaps / reconnects).
     // The socket listener is registered once in initState and guards internally.
@@ -195,6 +212,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _userPosAtOffRouteStart = null;
     _cogiOtroShown = false;
     _farAlertShown = false;
+    _stopBusCountPolling();
+    if (_waitingRoute != null) {
+      unawaited(ref.read(routesRepositoryProvider)
+          .unsubscribeWaitingAlert(_waitingRoute!.id));
+    }
+    _waitingRoute = null;
     // Revert to the regular foreground stream — no need for background updates
     // once the user is no longer in waiting mode.
     _startPositionStream();
@@ -205,6 +228,60 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _waitingEtaMinutes = null;
         _waitingDistanceM = null;
       });
+    }
+  }
+
+  void _startBusCountPolling(int routeId) {
+    _fetchBusCount(routeId);
+    _busCountTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _fetchBusCount(routeId);
+    });
+  }
+
+  void _stopBusCountPolling() {
+    _busCountTimer?.cancel();
+    _busCountTimer = null;
+    if (mounted) setState(() { _nearbyBusCount = 0; _alertActive = false; });
+  }
+
+  Future<void> _fetchBusCount(int routeId) async {
+    final mapState = ref.read(mapNotifierProvider);
+    if (mapState is! MapReady || mapState.userPosition == null) return;
+    final pos = mapState.userPosition!;
+    final result = await ref.read(routesRepositoryProvider).getNearbyBusCount(
+      routeId: routeId,
+      userLat: pos.latitude,
+      userLng: pos.longitude,
+    );
+    if (result is Success<int> && mounted) {
+      setState(() => _nearbyBusCount = result.data);
+    }
+  }
+
+  Future<void> _activateWaitingAlert(int routeId) async {
+    final mapState = ref.read(mapNotifierProvider);
+    if (mapState is! MapReady || mapState.userPosition == null) return;
+    final pos = mapState.userPosition!;
+    setState(() => _alertLoading = true);
+    final result = await ref.read(routesRepositoryProvider).subscribeWaitingAlert(
+      routeId: routeId,
+      userLat: pos.latitude,
+      userLng: pos.longitude,
+    );
+    if (!mounted) return;
+    if (result is Success<void>) {
+      setState(() { _alertActive = true; _alertLoading = false; });
+    } else {
+      setState(() => _alertLoading = false);
+      final err = (result as Failure<void>).error;
+      final isInsufficient = err is ServerError && err.statusCode == 402;
+      AppSnackbar.show(
+        context,
+        isInsufficient
+            ? AppStrings.waitingAlertInsufficientCredits
+            : err.message,
+        SnackbarType.error,
+      );
     }
   }
 
@@ -969,6 +1046,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 etaMinutes: _waitingEtaMinutes,
                 distanceMeters: _waitingDistanceM,
                 monitoringActive: _gpsMovementTimer != null,
+                nearbyBusCount: _nearbyBusCount,
+                alertActive: _alertActive,
+                alertLoading: _alertLoading,
+                onActivateAlert: _alertLoading
+                    ? null
+                    : () => _activateWaitingAlert(waitingRoute.id),
               ),
             ),
           // Active feed bar — hidden during waiting and trip
@@ -990,7 +1073,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       floatingActionButton: (isOnTrip || waitingRoute != null)
           ? null
           : FloatingActionButton.extended(
-              onPressed: () => context.go('/trip/boarding'),
+              onPressed: () {
+                unawaited(AnalyticsService.boardingFlowStarted());
+                context.go('/trip/boarding');
+              },
               backgroundColor: AppColors.primary,
               label: const Text(AppStrings.mapBoardFab),
               icon: const Icon(Icons.directions_bus),
@@ -1008,6 +1094,10 @@ class _WaitingBanner extends StatelessWidget {
   final int? etaMinutes;
   final double? distanceMeters;
   final bool monitoringActive;
+  final int nearbyBusCount;
+  final bool alertActive;
+  final bool alertLoading;
+  final VoidCallback? onActivateAlert;
 
   const _WaitingBanner({
     required this.route,
@@ -1015,6 +1105,10 @@ class _WaitingBanner extends StatelessWidget {
     required this.etaMinutes,
     required this.distanceMeters,
     required this.monitoringActive,
+    required this.nearbyBusCount,
+    required this.alertActive,
+    required this.alertLoading,
+    required this.onActivateAlert,
   });
 
   String get _etaText {
@@ -1123,6 +1217,61 @@ class _WaitingBanner extends StatelessWidget {
                   ],
                 ),
               ],
+              const SizedBox(height: 6),
+              Row(
+                children: <Widget>[
+                  Icon(
+                    nearbyBusCount > 0 ? Icons.directions_bus : Icons.directions_bus_outlined,
+                    size: 15,
+                    color: nearbyBusCount > 0 ? AppColors.success : AppColors.textSecondary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    nearbyBusCount == 0
+                        ? AppStrings.waitingBusCount0
+                        : nearbyBusCount == 1
+                            ? AppStrings.waitingBusCount1
+                            : AppStrings.waitingBusCountN(nearbyBusCount),
+                    style: AppTextStyles.caption.copyWith(
+                      color: nearbyBusCount > 0 ? AppColors.success : AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: alertActive
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            const Icon(
+                              Icons.notifications_active,
+                              size: 15,
+                              color: AppColors.success,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              AppStrings.waitingAlertActive,
+                              style: AppTextStyles.caption.copyWith(color: AppColors.success),
+                            ),
+                          ],
+                        ),
+                      )
+                    : AppButton.outlined(
+                        label: alertLoading
+                            ? AppStrings.waitingAlertActivating
+                            : '${AppStrings.waitingAlertButton} · ${AppStrings.waitingAlertCost}',
+                        onPressed: alertLoading ? null : onActivateAlert,
+                      ),
+              ),
             ],
           ),
         ),

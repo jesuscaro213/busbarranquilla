@@ -27,6 +27,12 @@ abstract final class AppTextStyles {
     color: AppColors.textSecondary,
   );
 
+  static const caption = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    color: AppColors.textSecondary,
+  );
+
   static const button = TextStyle(
     fontSize: 16,
     fontWeight: FontWeight.w600,

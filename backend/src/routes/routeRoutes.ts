@@ -13,10 +13,12 @@ import {
   getPlanRoutes,
   regenerateGeometry,
   getRouteActivity,
+  getNearbyBuses,
   snapWaypoints,
   getRouteShareInfo,
 } from '../controllers/routeController';
 import { recommendRoutes } from '../controllers/recommendController';
+import { subscribeWaitingAlert, unsubscribeWaitingAlert } from '../controllers/waitingAlertController';
 import {
   reportRouteUpdate,
   updateDeviationReEntry,
@@ -37,6 +39,9 @@ router.post('/recommend', recommendRoutes);
 router.get('/active-feed', authMiddleware, getActiveFeed);
 router.get('/plan', authMiddleware, getPlanRoutes);
 router.get('/:id/share', getRouteShareInfo);
+router.get('/:id/nearby-buses', authMiddleware, getNearbyBuses);
+router.post('/:id/waiting-alert', authMiddleware, subscribeWaitingAlert);
+router.delete('/:id/waiting-alert', authMiddleware, unsubscribeWaitingAlert);
 router.post('/snap-waypoints', authMiddleware, requireRole('admin'), snapWaypoints);
 router.get('/update-alerts', authMiddleware, requireRole('admin'), getRouteUpdateAlerts);
 router.get('/update-alerts/count', authMiddleware, requireRole('admin'), getRouteUpdateAlertsCount);

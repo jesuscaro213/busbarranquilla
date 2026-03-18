@@ -1118,4 +1118,54 @@ if (!await store.manage.ready) await store.manage.create();
 
 **Comportamiento:** señal perdida → socket_io_client reconecta automáticamente → evento `'reconnect'` → re-join de la sala de ruta → reportes y confirmaciones en tiempo real continúan sin reiniciar la app.
 
-*Última actualización: 2026-03-18 (v40)*
+## Firebase Analytics (Spec 49) ✅ Implementado
+
+**Paquete:** `firebase_analytics: ^11.3.3` en `pubspec.yaml`.
+
+**`lib/core/analytics/analytics_service.dart`** — servicio estático centralizado con 10 métodos:
+
+| Método | Evento Firebase | Parámetros |
+|--------|----------------|-----------|
+| `boardingFlowStarted()` | `boarding_flow_started` | — |
+| `routeSelected(id, code)` | `route_selected` | `route_id`, `route_code` |
+| `tripStarted(id, code)` | `trip_started` | `route_id`, `route_code` |
+| `tripEnded(...)` | `trip_ended` | `duration_minutes`, `credits_earned`, `distance_meters` |
+| `reportCreated(type)` | `report_created` | `type` |
+| `destinationSet(method)` | `destination_set` | `method` ('map_pick'\|'stop_list') |
+| `dropoffAlertActivated()` | `dropoff_alert_activated` | — |
+| `plannerSearched()` | `planner_searched` | — |
+| `premiumCheckoutStarted()` | `premium_checkout_started` | — |
+| `noDestinationNudgeSent(variant)` | `no_destination_nudge_sent` | `variant` ('regular'\|'premium_upsell') |
+
+**Puntos de instrumentación:**
+- `map_screen.dart` — FAB "Me subí": `boardingFlowStarted`
+- `boarding_confirm_screen.dart` — `initState`: `routeSelected`
+- `trip_notifier.dart` — `startTrip()`: `tripStarted`; `endTrip()`: `tripEnded`; `createReport()` success: `reportCreated`; `_noDestTimer` ambas ramas: `noDestinationNudgeSent`
+- `active_trip_screen.dart` — `_pickDestinationOnMap()` y `_changeDestination()`: `destinationSet` + `dropoffAlertActivated`
+- `planner_screen.dart` — `_onSearch()`: `plannerSearched`
+- `premium_card.dart` — tap: `premiumCheckoutStarted`
+
+Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean el hilo principal.
+
+## Waiting mode bus counter + alerta de llegada (Spec 50) ✅ Implementado
+
+**Backend — nuevos elementos:**
+- Tabla `waiting_alerts` (`user_id, route_id, user_lat, user_lng, is_active, expires_at 30min`) con índice en `route_id WHERE is_active=true`
+- Cleanup de alertas expiradas en startup junto al zombie-trip cleanup
+- `GET /api/routes/:id/nearby-buses?userLat&userLng&radiusKm=2` — cuenta buses activos dentro del radio que van en dirección correcta (`busIdx < userIdx` en la polyline)
+- `findNearestIdx(geometry, lat, lng)` — proyecta un punto sobre la polyline y devuelve el índice más cercano (exportado de `routeController.ts`)
+- `POST /api/routes/:id/waiting-alert` — registra alerta; cobra 3 créditos a usuarios free; gratis para premium/admin; retorna 402 si créditos insuficientes
+- `DELETE /api/routes/:id/waiting-alert` — cancela alerta activa
+- En `updateLocation`: tras boarding alerts block, chequea `waiting_alerts` activas para la ruta; si bus ≤300m Y `busIdx < userIdx` → push "¡Tu bus está llegando!" + desactiva alerta
+
+**Flutter — `map_screen.dart`:**
+- Estado `_nearbyBusCount`, `_alertActive`, `_alertLoading`, `_busCountTimer`
+- `_startBusCountPolling(routeId)` — fetch inmediato + `Timer.periodic(30s)`
+- `_stopBusCountPolling()` — cancela timer, limpia estado
+- `_activateWaitingAlert(routeId)` — llama al endpoint, maneja error 402 con snackbar
+- Polling arranca al entrar en waiting mode, se cancela al salir (incluyendo cuando el usuario inicia viaje)
+- `_WaitingBanner` muestra contador con color verde/gris según `_nearbyBusCount` y botón de alerta que cambia a estado "Te avisaremos" cuando está activa
+
+**Strings nuevos:** `waitingBusCount0/1/N`, `waitingAlertButton`, `waitingAlertActive`, `waitingAlertActivating`, `waitingAlertInsufficientCredits`, `waitingAlertCost`
+
+*Última actualización: 2026-03-18 (v42)*

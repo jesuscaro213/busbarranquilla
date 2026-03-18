@@ -22,6 +22,7 @@ import '../../../core/domain/models/trip_end_result.dart';
 import '../../../core/domain/models/bus_route.dart';
 import '../../../core/domain/models/report.dart';
 import '../../../core/domain/models/stop.dart';
+import '../../../core/analytics/analytics_service.dart';
 import '../../../core/error/result.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/location/location_service.dart';
@@ -311,6 +312,7 @@ class TripNotifier extends Notifier<TripState> {
     _reportsCreatedThisTrip = 0;
     _lastGpsAt = DateTime.now();
 
+    unawaited(AnalyticsService.tripStarted(routeId, route.code));
     state = activeState;
 
     final vibCaps = await _queryVibrationCaps();
@@ -345,12 +347,14 @@ class TripNotifier extends Notifier<TripState> {
           final hasCredits = user.credits >= 5;
 
           if (!isPremium && !hasCredits) {
+            unawaited(AnalyticsService.noDestinationNudgeSent('premium_upsell'));
             unawaited(NotificationService.showAlert(
               title: AppStrings.noDestinationPremiumNudgeTitle,
               body: AppStrings.noDestinationPremiumNudgeBody,
               payload: 'no_destination',
             ));
           } else {
+            unawaited(AnalyticsService.noDestinationNudgeSent('regular'));
             unawaited(NotificationService.showAlert(
               title: AppStrings.noDestinationNudgeTitle,
               body: AppStrings.noDestinationNudgeBody,
@@ -434,6 +438,14 @@ class TripNotifier extends Notifier<TripState> {
           streakDays: streakDays,
           deviationDetected: data.deviationDetected,
         );
+        final durationMinutes = data.trip.startedAt != null
+            ? DateTime.now().difference(data.trip.startedAt!).inMinutes
+            : 0;
+        unawaited(AnalyticsService.tripEnded(
+          durationMinutes: durationMinutes,
+          creditsEarned: data.totalCreditsEarned,
+          distanceMeters: data.distanceMeters.toDouble(),
+        ));
       case Failure<TripEndResult>():
         state = const TripIdle();
       default:
@@ -800,6 +812,7 @@ class TripNotifier extends Notifier<TripState> {
     switch (result) {
       case Success<Report>(data: final report):
         _reportsCreatedThisTrip++;
+        unawaited(AnalyticsService.reportCreated(type));
         // Track the desvio report so it can be auto-resolved when bus returns to route.
         if (type == 'desvio') {
           _desvioReportId = report.id;

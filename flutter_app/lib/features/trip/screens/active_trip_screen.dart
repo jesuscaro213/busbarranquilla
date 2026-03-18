@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/analytics/analytics_service.dart';
 import '../../../core/l10n/strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_bottom_sheet.dart';
@@ -226,6 +227,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     if (mounted) {
       AppSnackbar.show(context, AppStrings.dropoffDestinationSet, SnackbarType.success);
     }
+    unawaited(AnalyticsService.destinationSet('map_pick'));
+    unawaited(AnalyticsService.dropoffAlertActivated());
   }
 
   Future<void> _changeDestination() async {
@@ -275,6 +278,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
       await notifier.setDestinationByLatLng(result.lat, result.lng, result.displayName);
       if (mounted) AppSnackbar.show(context, AppStrings.dropoffDestinationSet, SnackbarType.success);
     }
+    unawaited(AnalyticsService.destinationSet('stop_list'));
+    unawaited(AnalyticsService.dropoffAlertActivated());
   }
 
   Future<bool?> _showDestinationConfirm(String locationName) {

@@ -87,4 +87,36 @@ class RoutesRemoteSource {
       data: <String, dynamic>{'lat': lat, 'lng': lng},
     );
   }
+
+  Future<int> getNearbyBusCount({
+    required int routeId,
+    required double userLat,
+    required double userLng,
+    double radiusKm = 2.0,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      ApiPaths.routeNearbyBuses(routeId),
+      queryParameters: <String, dynamic>{
+        'userLat': userLat,
+        'userLng': userLng,
+        'radiusKm': radiusKm,
+      },
+    );
+    return (response.data!['count'] as num).toInt();
+  }
+
+  Future<void> subscribeWaitingAlert({
+    required int routeId,
+    required double userLat,
+    required double userLng,
+  }) async {
+    await _dio.post<void>(
+      ApiPaths.routeWaitingAlert(routeId),
+      data: <String, dynamic>{'userLat': userLat, 'userLng': userLng},
+    );
+  }
+
+  Future<void> unsubscribeWaitingAlert(int routeId) async {
+    await _dio.delete<void>(ApiPaths.routeWaitingAlert(routeId));
+  }
 }

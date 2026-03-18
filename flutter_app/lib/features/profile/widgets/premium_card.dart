@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/analytics/analytics_service.dart';
 import '../../../core/data/repositories/payments_repository.dart';
 import '../../../core/domain/models/user.dart';
 import '../../../core/error/result.dart';
@@ -132,6 +135,7 @@ class PremiumCard extends ConsumerWidget {
                 return;
               }
 
+              unawaited(AnalyticsService.premiumCheckoutStarted());
               final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
               if (!launched && context.mounted) {
                 AppSnackbar.show(context, AppStrings.errorUnknown, SnackbarType.error);

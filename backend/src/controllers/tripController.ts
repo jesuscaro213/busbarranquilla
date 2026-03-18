@@ -3,6 +3,7 @@ import pool from '../config/database';
 import { awardCredits } from './creditController';
 import { getIo } from '../config/socket';
 import { sendPushToUser } from '../services/pushNotificationService';
+import { findNearestIdx, haversineKm } from './routeController';
 
 const MAX_TRIP_LOCATION_CREDITS = 15; // máx créditos por ubicación en un viaje (~15 min activos)
 
@@ -269,6 +270,55 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
     } catch (alertErr) {
       console.error('Error en boarding alert check:', alertErr);
       // No re-throw — la respuesta ya fue enviada
+    }
+
+    // ── Waiting alerts ────────────────────────────────────────────────────
+    try {
+      const routeResult = await pool.query(
+        'SELECT geometry FROM routes WHERE id = $1',
+        [trip.route_id],
+      );
+      const geometry: [number, number][] | null = routeResult.rows[0]?.geometry ?? null;
+
+      const alertsResult = await pool.query(
+        `SELECT wa.id, wa.user_id, wa.user_lat, wa.user_lng, u.fcm_token
+         FROM waiting_alerts wa
+         JOIN users u ON u.id = wa.user_id
+         WHERE wa.route_id = $1 AND wa.is_active = true AND wa.expires_at > NOW()`,
+        [trip.route_id],
+      );
+
+      for (const alert of alertsResult.rows) {
+        const distKm = haversineKm(
+          parseFloat(alert.user_lat), parseFloat(alert.user_lng),
+          latitude, longitude,
+        );
+        if (distKm > 0.3) continue;
+
+        // Direction check
+        if (geometry) {
+          const userIdx = findNearestIdx(geometry,
+            parseFloat(alert.user_lat), parseFloat(alert.user_lng));
+          const busIdx = findNearestIdx(geometry, latitude, longitude);
+          if (busIdx >= userIdx) continue; // wrong direction
+        }
+
+        // Fire push
+        if (alert.fcm_token) {
+          await sendPushToUser(alert.fcm_token, '¡Tu bus está llegando!', 'Un bus de tu ruta está a menos de 300 m. ¡Prepárate!', {
+            type: 'bus_arriving',
+            routeId: String(trip.route_id),
+          });
+        }
+
+        // Deactivate alert so it only fires once
+        await pool.query(
+          'UPDATE waiting_alerts SET is_active = false WHERE id = $1',
+          [alert.id],
+        );
+      }
+    } catch (err) {
+      console.error('Waiting alert check error:', err);
     }
 
   } catch (error) {

@@ -247,7 +247,7 @@ class TripNotifier extends Notifier<TripState> {
     // This shows the system dialog with the "Allow all the time" option.
     await LocationService.requestBackgroundPermission();
 
-    final pos = await LocationService.getCurrentPosition();
+    final pos = await LocationService.getBestEffortPosition();
     if (pos == null) {
       state = const TripError(AppStrings.locationRequired);
       return;

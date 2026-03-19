@@ -409,8 +409,9 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final tripState = ref.watch(tripNotifierProvider);
-    final isLoadingTrip = tripState is TripLoading;
+    final isLoadingTrip = ref.watch(
+      tripNotifierProvider.select((s) => s is TripLoading),
+    );
 
     if (_loading) return const Scaffold(body: LoadingIndicator());
 

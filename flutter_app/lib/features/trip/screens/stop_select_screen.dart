@@ -84,8 +84,8 @@ class _StopSelectScreenState extends ConsumerState<StopSelectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final tripState = ref.watch(tripNotifierProvider);
-    final isLoadingTrip = !widget.setDestination && tripState is TripLoading;
+    final isLoadingTrip = !widget.setDestination &&
+        ref.watch(tripNotifierProvider.select((s) => s is TripLoading));
 
     if (_loading) {
       return const Scaffold(body: LoadingIndicator());

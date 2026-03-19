@@ -89,6 +89,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   LatLng? _userPosAtOffRouteStart; // GPS usuario cuando _offRouteStart se asignó
   bool _farAlertShown = false; // evita mostrar el diálogo M5 repetidamente
   bool _cogiOtroShown = false; // evita mostrar el diálogo de "¿Cogiste otro bus?" dos veces
+  ProviderSubscription<BusRoute?>? _waitingRouteSub;
 
   // ── Compartido ────────────────────────────────────────────────────────────
   bool _autoboardPending = false; // bloquea doble disparo
@@ -97,6 +98,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _waitingRouteSub = ref.listenManual<BusRoute?>(selectedWaitingRouteProvider, (prev, next) {
+      if (next == null) {
+        _stopWaiting();
+      } else if (next.id != prev?.id) {
+        _startWaiting(next);
+      }
+    });
     Future<void>(() async {
       final token = await ref.read(secureStorageProvider).readToken();
       if (!mounted) return;
@@ -150,6 +158,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _autoboardUndoTimer?.cancel();
     _gpsMovementTimer?.cancel();
     _busCountTimer?.cancel();
+    _waitingRouteSub?.close();
     _positionSubscription?.cancel();
     _mapController.dispose();
     super.dispose();
@@ -869,16 +878,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget build(BuildContext context) {
     final mapState = ref.watch(mapNotifierProvider);
 
-    // Watch waiting route and react to changes
-    ref.listen<BusRoute?>(selectedWaitingRouteProvider, (prev, next) {
-      if (next == null) {
-        _stopWaiting();
-      } else if (next.id != prev?.id) {
-        _startWaiting(next);
-      }
-    });
-
-
     if (mapState is MapLoading) {
       return const Scaffold(body: LoadingIndicator());
     }
@@ -893,9 +892,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final ready = mapState as MapReady;
     final selectedRoute = ref.watch(selectedFeedRouteProvider);
     final waitingRoute = ref.watch(selectedWaitingRouteProvider);
-    final tripState = ref.watch(tripNotifierProvider);
-    final isOnTrip = tripState is TripActive;
-    final activeTrip = isOnTrip ? tripState : null;
+    final TripActive? activeTrip = ref.watch(tripNotifierProvider.select(
+      (s) => s is TripActive ? s : null,
+    ));
+    final isOnTrip = activeTrip != null;
     final activeTripGeometry = activeTrip?.route.geometry ?? const <LatLng>[];
     final destinationStop = activeTrip != null && activeTrip.trip.destinationStopId != null
         ? activeTrip.stops.where((s) => s.id == activeTrip.trip.destinationStopId).firstOrNull
@@ -908,10 +908,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // Also filter own trip from BusMarkerLayer to avoid duplicate icon.
     int? ownTripId;
     LatLng? tripPosition;
-    if (tripState is TripActive) {
-      ownTripId = tripState.trip.id;
-      final lat = tripState.trip.currentLatitude;
-      final lng = tripState.trip.currentLongitude;
+    if (activeTrip != null) {
+      ownTripId = activeTrip.trip.id;
+      final lat = activeTrip.trip.currentLatitude;
+      final lng = activeTrip.trip.currentLongitude;
       if (lat != null && lng != null) {
         tripPosition = LatLng(lat, lng);
       }

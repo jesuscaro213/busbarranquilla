@@ -177,13 +177,15 @@ class MiBusApp extends ConsumerStatefulWidget {
 }
 
 class _MiBusAppState extends ConsumerState<MiBusApp> {
+  ProviderSubscription<AuthState>? _authSub;
+
   @override
   void initState() {
     super.initState();
 
     // Tag Crashlytics reports with the authenticated user's ID so crashes
     // can be filtered by account in the Firebase console.
-    ref.listen<AuthState>(authNotifierProvider, (_, next) {
+    _authSub = ref.listenManual<AuthState>(authNotifierProvider, (_, next) {
       if (next is Authenticated) {
         FirebaseCrashlytics.instance
             .setUserIdentifier(next.user.id.toString());
@@ -209,6 +211,12 @@ class _MiBusAppState extends ConsumerState<MiBusApp> {
     NotificationService.listenTokenRefresh((newToken) {
       ref.read(authRepositoryProvider).updateFcmToken(newToken);
     });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.close();
+    super.dispose();
   }
 
   void _handleNotificationTap(Map<String, dynamic> data) {

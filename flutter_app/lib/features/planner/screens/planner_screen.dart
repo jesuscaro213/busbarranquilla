@@ -95,7 +95,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     }
 
     // Fallback: ask GPS (happens only if map hasn't loaded yet).
-    final position = await LocationService.getCurrentPosition();
+    final position = await LocationService.getBestEffortPosition();
     if (position == null || !mounted) return;
     ref.read(plannerNotifierProvider.notifier).setOrigin(
           NominatimResult(
@@ -209,15 +209,9 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 height: 92,
                 child: switch (favoritesAsync) {
                   AsyncLoading() => const LoadingIndicator(),
-                  AsyncError() => const EmptyView(
-                      icon: Icons.favorite_border,
-                      message: AppStrings.noFavorites,
-                    ),
+                  AsyncError() => const _FavoritesEmpty(),
                   AsyncData(value: final favorites) => favorites.isEmpty
-                      ? const EmptyView(
-                          icon: Icons.favorite_border,
-                          message: AppStrings.noFavorites,
-                        )
+                      ? const _FavoritesEmpty()
                       : ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: favorites.length,
@@ -401,14 +395,15 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                             const SizedBox(height: 10),
                             const Divider(height: 1),
                             const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
                                 OutlinedButton.icon(
                                   onPressed: () => _startWaiting(route),
                                   icon: const Icon(Icons.notifications_active_outlined, size: 16),
                                   label: const Text(AppStrings.waitButton),
                                 ),
+                                const SizedBox(height: 8),
                                 FilledButton.icon(
                                   onPressed: () => context.push('/trip/confirm?routeId=${route.id}'),
                                   style: FilledButton.styleFrom(
@@ -492,6 +487,33 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 isLoading: isLoading,
                 onPressed: isLoading ? null : _onSearch,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesEmpty extends StatelessWidget {
+  const _FavoritesEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.favorite_border, size: 28, color: AppColors.textSecondary),
+            const SizedBox(height: 6),
+            Text(
+              AppStrings.noFavorites,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

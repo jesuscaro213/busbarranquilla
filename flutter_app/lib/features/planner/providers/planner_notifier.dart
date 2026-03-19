@@ -18,8 +18,8 @@ final nominatimDioProvider = Provider<Dio>((ref) {
   return Dio(
     BaseOptions(
       baseUrl: 'https://nominatim.openstreetmap.org',
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 5),
       headers: const <String, String>{
         'User-Agent': 'MiBusApp/1.0',
       },
@@ -95,7 +95,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
       // Get fresh GPS position so nearby routes use current location, not the
       // coordinates captured when the screen first loaded.
-      final pos = await LocationService.getCurrentPosition();
+      final pos = await LocationService.getBestEffortPosition();
       if (pos == null) return;
 
       final updated = NominatimResult(

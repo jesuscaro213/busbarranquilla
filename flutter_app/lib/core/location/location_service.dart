@@ -99,6 +99,34 @@ class LocationService {
     );
   }
 
+  static Future<Position?> getBestEffortPosition({
+    Duration timeLimit = const Duration(seconds: 5),
+  }) async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return null;
+
+    final hasPermission = await requestLocationPermission();
+    if (!hasPermission) return null;
+
+    try {
+      final cached = await Geolocator.getLastKnownPosition();
+      if (cached != null) return cached;
+    } catch (_) {
+      // Ignore permission/OS errors and fall back to a fresh fix.
+    }
+
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: timeLimit,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   static double distanceKm(
     double lat1,
     double lng1,

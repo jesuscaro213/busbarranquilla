@@ -117,6 +117,15 @@ Cada reporte incluye `reported_geometry` (traza GPS del usuario) y `route_geomet
 - `main_shell.dart`: bar inferior reducido a "Monitoreando tu posición".
 - `map_screen.dart`: banner inferior ya no muestra "Monitoreando tu posición" para evitar duplicado.
 
+## Flutter UI — Planner search feedback (2026-03-23)
+
+- `address_search_field.dart`: estado de “Buscando lugares…” y estado vacío con sugerencia de usar el mapa.
+
+## Planner — Nominatim fallback para nombres parciales (2026-03-23)
+
+- `planner_notifier.dart`: fallback por ciudades del AMB (Soledad, Malambo, Puerto Colombia, Galapa) y detección de ciudad en el query para evitar ambigüedad.
+- `address_search_field.dart`: subtítulo solo se muestra cuando hay ambigüedad y se resalta con color.
+
 ## Archivos clave modificados (esta sesión)
 - `backend/src/controllers/routeDescriptionController.ts` — geocodificación multimunicipio + Google Maps
 - `web/src/pages/admin/AdminRoutes.tsx` — borrado por segmento (reemplaza borrador freehand)
@@ -127,3 +136,6 @@ Cada reporte incluye `reported_geometry` (traza GPS del usuario) y `route_geomet
 - `flutter_app/lib/features/trip/screens/boarding_confirm_screen.dart` — selección de parada solo por mapa
 - `flutter_app/lib/features/map/screens/map_screen.dart` — bar superior de espera
 - `flutter_app/lib/features/shell/main_shell.dart` — bar inferior solo monitoreo
+- `flutter_app/lib/features/planner/widgets/address_search_field.dart` — feedback de búsqueda
+- `flutter_app/lib/core/l10n/strings.dart` — strings de búsqueda del planner
+- `flutter_app/lib/features/planner/providers/planner_notifier.dart` — fallback de búsqueda

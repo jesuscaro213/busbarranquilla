@@ -75,6 +75,9 @@ abstract final class AppStrings {
   static const currentLocationLabel = 'Mi ubicación';
   static const plannerPickPointsError = 'Selecciona origen y destino para continuar.';
   static const plannerDestRequired = 'Escribe un destino para buscar rutas.';
+  static const plannerSearching = 'Buscando lugares...';
+  static const plannerNoResults = 'No encontramos ese lugar.';
+  static const plannerNoResultsHint = 'Prueba con el mapa para ser más preciso.';
   static const favoritesTitle = 'Favoritos';
   static const noFavorites = 'Aún no tienes rutas favoritas';
   static const nearbyRoutesTitle = 'Buses en tu zona';

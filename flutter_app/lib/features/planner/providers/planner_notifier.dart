@@ -153,44 +153,88 @@ class PlannerNotifier extends Notifier<PlannerState> {
       return cached;
     }
 
-    final sw = Stopwatch()..start();
-    debugPrint('[PERF][NOMINATIM] buscando "$cleanQuery"...');
     try {
-      final response = await ref.read(nominatimDioProvider).get<List<dynamic>>(
-        '/search',
-        queryParameters: <String, dynamic>{
-          'q': '${_normalizeColombianAddress(cleanQuery)} Barranquilla Colombia',
-          'format': 'jsonv2',
-          'limit': 6,
-          'countrycodes': 'co',
-          'bounded': 1,
-          'viewbox': '-74.98,11.08,-74.62,10.82',
-          'addressdetails': 1,
-        },
-      );
-
-      final items = response.data ?? const <dynamic>[];
-      final results = <NominatimResult>[];
-
-      for (final item in items) {
-        if (item is! Map) continue;
-        final parsed = NominatimResult.fromJson(Map<String, dynamic>.from(item));
-        final isInBounds = parsed.lat >= _minLat &&
-            parsed.lat <= _maxLat &&
-            parsed.lng >= _minLng &&
-            parsed.lng <= _maxLng;
-        if (isInBounds) {
-          results.add(parsed);
-        }
-      }
+      final results = await _searchWithFallback(cleanQuery);
 
       _searchCache[cacheKey] = results;
-      debugPrint('[PERF][NOMINATIM] respuesta en ${sw.elapsedMilliseconds}ms → ${results.length} resultados');
+      debugPrint('[PERF][NOMINATIM] resultados → ${results.length}');
       return results;
     } catch (_) {
-      debugPrint('[PERF][NOMINATIM] error/timeout tras ${sw.elapsedMilliseconds}ms');
+      debugPrint('[PERF][NOMINATIM] error/timeout');
       return const <NominatimResult>[];
     }
+  }
+
+  Future<List<NominatimResult>> _searchWithFallback(String cleanQuery) async {
+    final sw = Stopwatch()..start();
+    debugPrint('[PERF][NOMINATIM] buscando "$cleanQuery"...');
+    final normalized = _normalizeColombianAddress(cleanQuery);
+
+    final detectedCity = _detectCity(normalized);
+    final queries = detectedCity != null
+        ? <String>['$normalized $detectedCity Colombia']
+        : <String>[
+            '$normalized Barranquilla Colombia',
+            '$normalized Soledad Atlantico Colombia',
+            '$normalized Malambo Atlantico Colombia',
+            '$normalized Puerto Colombia Atlantico Colombia',
+            '$normalized Galapa Atlantico Colombia',
+          ];
+
+    for (final q in queries) {
+      final results = await _fetchNominatim(q);
+      if (results.isNotEmpty) {
+        debugPrint('[PERF][NOMINATIM] respuesta en ${sw.elapsedMilliseconds}ms → ${results.length} resultados');
+        return results;
+      }
+    }
+
+    // Fallback: raw query without forced city — helps with partial place names.
+    final fallback = await _fetchNominatim(cleanQuery);
+    debugPrint('[PERF][NOMINATIM] fallback en ${sw.elapsedMilliseconds}ms → ${fallback.length} resultados');
+    return fallback;
+  }
+
+  String? _detectCity(String query) {
+    final q = query.toLowerCase();
+    if (q.contains('barranquilla')) return 'Barranquilla';
+    if (q.contains('soledad')) return 'Soledad Atlantico';
+    if (q.contains('malambo')) return 'Malambo Atlantico';
+    if (q.contains('puerto colombia')) return 'Puerto Colombia Atlantico';
+    if (q.contains('galapa')) return 'Galapa Atlantico';
+    return null;
+  }
+
+  Future<List<NominatimResult>> _fetchNominatim(String q) async {
+    final response = await ref.read(nominatimDioProvider).get<List<dynamic>>(
+      '/search',
+      queryParameters: <String, dynamic>{
+        'q': q,
+        'format': 'jsonv2',
+        'limit': 6,
+        'countrycodes': 'co',
+        'bounded': 1,
+        'viewbox': '-74.98,11.08,-74.62,10.82',
+        'addressdetails': 1,
+      },
+    );
+
+    final items = response.data ?? const <dynamic>[];
+    final results = <NominatimResult>[];
+
+    for (final item in items) {
+      if (item is! Map) continue;
+      final parsed = NominatimResult.fromJson(Map<String, dynamic>.from(item));
+      final isInBounds = parsed.lat >= _minLat &&
+          parsed.lat <= _maxLat &&
+          parsed.lng >= _minLng &&
+          parsed.lng <= _maxLng;
+      if (isInBounds) {
+        results.add(parsed);
+      }
+    }
+
+    return results;
   }
 
   /// Normalizes Colombian addresses:

@@ -1252,3 +1252,27 @@ Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean e
  - `map_screen.dart`: el banner inferior ya no repite **"Monitoreando tu posición"** (evita duplicado).
 
 *Última actualización: 2026-03-23 (v51)*
+
+## UI — Planner search feedback (2026-03-23) ✅
+
+**Problema:** búsqueda de origen/destino se percibía lenta y no mostraba estado cuando no había resultados.
+
+**Fix:** `address_search_field.dart` ahora muestra:
+- estado de “Buscando lugares…” mientras consulta
+- estado vacío con sugerencia de usar el mapa cuando no hay resultados
+
+*Última actualización: 2026-03-23 (v52)*
+
+## Planner — Nominatim fallback for partial names (2026-03-23) ✅
+
+**Problema:** búsquedas parciales (ej. "Edgar Ren") podían devolver 0 resultados al forzar "Barranquilla Colombia".
+
+**Fix:** `planner_notifier.dart` ahora hace fallback: primero consulta con ciudad forzada, y si no hay resultados, repite con el query original sin ciudad.
+
+**Extra:** se agregaron consultas intermedias para **Soledad**, **Malambo**, **Puerto Colombia** y **Galapa** antes del fallback sin ciudad.
+**Precaución:** si el usuario incluye explícitamente una ciudad en la búsqueda, se usa **solo esa ciudad** para evitar ambigüedad en direcciones repetidas.
+**UI:** resultados muestran un subtítulo con la ciudad/dep/país (extraído de `display_name`) para elegir con más precisión.
+**Ajuste:** el subtítulo ahora muestra **solo la ciudad** del AMB (Barranquilla, Soledad, Malambo, Puerto Colombia, Galapa).
+**Ambigüedad:** el subtítulo solo aparece cuando hay **resultados con el mismo nombre base**, y se resalta para facilitar la elección.
+
+*Última actualización: 2026-03-23 (v58)*

@@ -111,6 +111,12 @@ Cada reporte incluye `reported_geometry` (traza GPS del usuario) y `route_geomet
 
 - `boarding_confirm_screen.dart`: se eliminó la lista modal; la parada se selecciona desde el mapa y el texto "Cambiar" ahora abre el mapa.
 
+## Flutter UI — Waiting mode bars (2026-03-23)
+
+- `map_screen.dart`: bar superior con acciones de espera (¡Ya me subí! / Dejar de esperar).
+- `main_shell.dart`: bar inferior reducido a "Monitoreando tu posición".
+- `map_screen.dart`: banner inferior ya no muestra "Monitoreando tu posición" para evitar duplicado.
+
 ## Archivos clave modificados (esta sesión)
 - `backend/src/controllers/routeDescriptionController.ts` — geocodificación multimunicipio + Google Maps
 - `web/src/pages/admin/AdminRoutes.tsx` — borrado por segmento (reemplaza borrador freehand)
@@ -119,3 +125,5 @@ Cada reporte incluye `reported_geometry` (traza GPS del usuario) y `route_geomet
 - `flutter_app/lib/features/trip/screens/active_trip_screen.dart` — header de resumen con SafeArea
 - `flutter_app/lib/features/map/screens/map_pick_screen.dart` — botón de confirmar punto más arriba
 - `flutter_app/lib/features/trip/screens/boarding_confirm_screen.dart` — selección de parada solo por mapa
+- `flutter_app/lib/features/map/screens/map_screen.dart` — bar superior de espera
+- `flutter_app/lib/features/shell/main_shell.dart` — bar inferior solo monitoreo

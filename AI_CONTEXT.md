@@ -1242,4 +1242,13 @@ Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean e
 
 **Fix:** en `boarding_confirm_screen.dart` se eliminó la lista modal; la selección de parada se hace **solo** desde el mapa. El texto **"Cambiar"** permanece y abre el mapa (igual que el ícono).
 
-*Última actualización: 2026-03-23 (v49)*
+## UI — Waiting mode bars (2026-03-23) ✅
+
+**Problema:** los botones principales de "Esperando bus" quedaban abajo y podían pasar desapercibidos.
+
+**Fix:**
+- `map_screen.dart`: nuevo **bar superior** con "Esperando bus", ruta y botones "¡Ya me subí!" / "Dejar de esperar".
+- `main_shell.dart`: el bar inferior en modo espera ahora solo muestra **"Monitoreando tu posición"**.
+ - `map_screen.dart`: el banner inferior ya no repite **"Monitoreando tu posición"** (evita duplicado).
+
+*Última actualización: 2026-03-23 (v51)*

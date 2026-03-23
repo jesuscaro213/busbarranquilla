@@ -89,7 +89,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     if (isOnTrip) {
       bottomBar = const _TripActiveBar();
     } else if (isWaiting) {
-      bottomBar = const _WaitingActiveBar();
+      bottomBar = const _WaitingMonitorBar();
     } else {
       bottomBar = NavigationBar(
         selectedIndex: currentIndex,
@@ -171,16 +171,15 @@ class _TripActiveBar extends StatelessWidget {
 
 // ── Waiting active bar ────────────────────────────────────────────────────────
 
-class _WaitingActiveBar extends ConsumerWidget {
-  const _WaitingActiveBar();
+class _WaitingMonitorBar extends StatelessWidget {
+  const _WaitingMonitorBar();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final route = ref.watch(selectedWaitingRouteProvider);
+  Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return Container(
-      height: 56 + bottomPad,
+      height: 36 + bottomPad,
       padding: EdgeInsets.only(bottom: bottomPad),
       decoration: BoxDecoration(
         color: AppColors.primaryDark,
@@ -192,70 +191,39 @@ class _WaitingActiveBar extends ConsumerWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12),
         child: Row(
           children: <Widget>[
-            const Icon(Icons.notifications_active, color: Colors.amber, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text(
-                    AppStrings.waitingActiveBar,
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  if (route != null)
-                    Text(
-                      '${route.code} · ${route.name}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
+            SizedBox(width: 6),
+            _WaitingDot(),
+            SizedBox(width: 6),
+            Text(
+              AppStrings.waitingMonitorLabel,
+              style: TextStyle(
+                color: Color(0xFF86EFAC),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: route == null
-                  ? null
-                  : () => context.push('/trip/confirm?routeId=${route.id}'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.success,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: const Icon(Icons.directions_bus, size: 16),
-              label: const Text(
-                AppStrings.boardedWaitingButton,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                ref.read(selectedWaitingRouteProvider.notifier).state = null;
-              },
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.white70,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(AppStrings.waitingCancel, style: TextStyle(fontSize: 12)),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _WaitingDot extends StatelessWidget {
+  const _WaitingDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 6,
+      height: 6,
+      decoration: const BoxDecoration(
+        color: Color(0xFF4ADE80),
+        shape: BoxShape.circle,
       ),
     );
   }

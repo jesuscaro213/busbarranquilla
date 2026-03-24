@@ -4,6 +4,19 @@ Guía de comportamiento para Claude Code en este repositorio.
 
 ---
 
+## REGLA #0 — CONSULTA DOCS ANTES DE OPINAR O SUGERIR
+
+**ANTES de proponer ideas, listar opciones, evaluar el estado de una feature, o responder "/idea.reviewer":**
+
+1. Lee `AI_CONTEXT.md` — para saber qué ya está implementado
+2. Lee `docs/changelog.md` — para saber qué se hizo en cada fase
+3. Lee `MEMORY.md` — para recordar decisiones de diseño y bugs resueltos
+
+**Si sugieres algo que ya está implementado, fallaste esta regla.**
+No hay excusa: siempre hay que leer antes de opinar.
+
+---
+
 ## REGLA #1 — ACTUALIZA DOCS ANTES DE TERMINAR
 
 **NUNCA termines una tarea sin haber actualizado `AI_CONTEXT.md` y `MEMORY.md`.**

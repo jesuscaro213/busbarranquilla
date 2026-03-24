@@ -15,12 +15,20 @@ import 'planner_state.dart';
 
 final selectedPlanRouteProvider = StateProvider<PlanResult?>((ref) => null);
 
+final photonDioProvider = Provider<Dio>((ref) {
+  return Dio(BaseOptions(
+    baseUrl: 'https://photon.komoot.io',
+    connectTimeout: const Duration(seconds: 6),
+    receiveTimeout: const Duration(seconds: 6),
+  ));
+});
+
 final nominatimDioProvider = Provider<Dio>((ref) {
   return Dio(
     BaseOptions(
       baseUrl: 'https://nominatim.openstreetmap.org',
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 5),
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 3),
       headers: const <String, String>{
         'User-Agent': 'MiBusApp/1.0',
       },
@@ -40,6 +48,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
   bool _originIsGps = false;
   Timer? _nearbyRefreshTimer;
   final Map<String, List<NominatimResult>> _searchCache = <String, List<NominatimResult>>{};
+  DateTime? _nominatimBlockedUntil;
 
   @override
   PlannerState build() {
@@ -156,7 +165,9 @@ class PlannerNotifier extends Notifier<PlannerState> {
     try {
       final results = await _searchWithFallback(cleanQuery);
 
-      _searchCache[cacheKey] = results;
+      if (results.isNotEmpty) {
+        _searchCache[cacheKey] = results;
+      }
       debugPrint('[PERF][NOMINATIM] resultados → ${results.length}');
       return results;
     } catch (_) {
@@ -167,42 +178,105 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   Future<List<NominatimResult>> _searchWithFallback(String cleanQuery) async {
     final sw = Stopwatch()..start();
-    debugPrint('[PERF][NOMINATIM] buscando "$cleanQuery"...');
-    final normalized = _normalizeColombianAddress(cleanQuery);
+    debugPrint('[PERF] buscando "$cleanQuery"...');
 
-    final detectedCity = _detectCity(normalized);
-    final queries = detectedCity != null
-        ? <String>['$normalized $detectedCity Colombia']
-        : <String>[
-            '$normalized Barranquilla Colombia',
-            '$normalized Soledad Atlantico Colombia',
-            '$normalized Malambo Atlantico Colombia',
-            '$normalized Puerto Colombia Atlantico Colombia',
-            '$normalized Galapa Atlantico Colombia',
-          ];
+    final now = DateTime.now();
+    final nominatimBlocked = _nominatimBlockedUntil != null && now.isBefore(_nominatimBlockedUntil!);
 
-    for (final q in queries) {
-      final results = await _fetchNominatim(q);
-      if (results.isNotEmpty) {
-        debugPrint('[PERF][NOMINATIM] respuesta en ${sw.elapsedMilliseconds}ms → ${results.length} resultados');
-        return results;
+    // Nominatim y Photon corren en paralelo — resultados se mergean al final.
+    final futures = <Future<List<NominatimResult>>>[
+      if (!nominatimBlocked) _fetchNominatimBestEffort(cleanQuery, now) else Future.value(const <NominatimResult>[]),
+      _fetchPhoton(cleanQuery),
+    ];
+
+    if (nominatimBlocked) {
+      debugPrint('[PERF][NOMINATIM] pausado por 429 — solo Photon');
+    }
+
+    final results = await Future.wait(futures);
+    final nominatimResults = results[0];
+    final photonResults = results[1];
+
+    debugPrint('[PERF][NOMINATIM] ${nominatimResults.length} resultados en ${sw.elapsedMilliseconds}ms');
+    debugPrint('[PERF][PHOTON] ${photonResults.length} resultados en ${sw.elapsedMilliseconds}ms');
+
+    // Merge sin duplicados — Nominatim primero (más preciso en direcciones formales)
+    final merged = <NominatimResult>[...nominatimResults];
+    final seen = nominatimResults.map((r) => r.displayName.toLowerCase()).toSet();
+    for (final r in photonResults) {
+      if (seen.add(r.displayName.toLowerCase())) {
+        merged.add(r);
       }
     }
 
-    // Fallback: raw query without forced city — helps with partial place names.
-    final fallback = await _fetchNominatim(cleanQuery);
-    debugPrint('[PERF][NOMINATIM] fallback en ${sw.elapsedMilliseconds}ms → ${fallback.length} resultados');
-    return fallback;
+    debugPrint('[PERF] total ${merged.length} resultados en ${sw.elapsedMilliseconds}ms');
+    return merged;
   }
 
-  String? _detectCity(String query) {
-    final q = query.toLowerCase();
-    if (q.contains('barranquilla')) return 'Barranquilla';
-    if (q.contains('soledad')) return 'Soledad Atlantico';
-    if (q.contains('malambo')) return 'Malambo Atlantico';
-    if (q.contains('puerto colombia')) return 'Puerto Colombia Atlantico';
-    if (q.contains('galapa')) return 'Galapa Atlantico';
-    return null;
+  /// 1 sola request a Nominatim — normaliza, expande abreviaturas y agrega contexto de ciudad.
+  /// Photon (paralelo) cubre los casos que Nominatim no encuentra.
+  Future<List<NominatimResult>> _fetchNominatimBestEffort(String cleanQuery, DateTime now) async {
+    try {
+      final normalized = _normalizeColombianAddress(cleanQuery);
+      final expanded = _expandForNominatim(normalized);
+      return await _fetchNominatim('$expanded Barranquilla Colombia');
+    } catch (e) {
+      if (e.toString().contains('429')) {
+        _nominatimBlockedUntil = now.add(const Duration(seconds: 30));
+        debugPrint('[PERF][NOMINATIM] 429 — pausando 30s');
+      } else {
+        debugPrint('[PERF][NOMINATIM] error/timeout: $e');
+      }
+      return const <NominatimResult>[];
+    }
+  }
+
+
+  Future<List<NominatimResult>> _fetchPhoton(String q) async {
+    try {
+      final response = await ref.read(photonDioProvider).get<Map<String, dynamic>>(
+        '/api',
+        queryParameters: <String, dynamic>{
+          'q': '$q Barranquilla',
+          'lang': 'es',
+          'limit': 6,
+          'bbox': '-74.98,10.82,-74.62,11.08',
+        },
+      );
+
+      final features = (response.data?['features'] as List<dynamic>?) ?? const <dynamic>[];
+      final results = <NominatimResult>[];
+
+      for (final feature in features) {
+        if (feature is! Map) continue;
+        final geometry = feature['geometry'] as Map<String, dynamic>?;
+        final coords = geometry?['coordinates'] as List<dynamic>?;
+        if (coords == null || coords.length < 2) continue;
+
+        final lng = (coords[0] as num).toDouble();
+        final lat = (coords[1] as num).toDouble();
+
+        if (lat < _minLat || lat > _maxLat || lng < _minLng || lng > _maxLng) continue;
+
+        final props = (feature['properties'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+        final name = props['name']?.toString() ?? '';
+        final city = props['city']?.toString() ?? props['county']?.toString() ?? '';
+        final state = props['state']?.toString() ?? '';
+
+        if (name.isEmpty) continue;
+
+        final parts = <String>[name, if (city.isNotEmpty) city, if (state.isNotEmpty) state];
+        results.add(NominatimResult(
+          displayName: parts.join(', '),
+          lat: lat,
+          lng: lng,
+        ));
+      }
+
+      return results;
+    } catch (_) {
+      return const <NominatimResult>[];
+    }
   }
 
   Future<List<NominatimResult>> _fetchNominatim(String q) async {
@@ -243,6 +317,29 @@ class PlannerNotifier extends Notifier<PlannerState> {
   /// The "N" separator (case-insensitive, surrounded by spaces) is replaced with "#".
   static String _normalizeColombianAddress(String query) {
     return query.replaceAllMapped(_colombianAddressRe, (match) => ' #');
+  }
+
+  /// Expands abbreviated Colombian street types and removes the "#" separator
+  /// so Nominatim can match OSM data (e.g. "Cr 14 # 45" → "Carrera 14 45").
+  static String _expandForNominatim(String query) {
+    // Remove "#" separator
+    var result = query.replaceAll(RegExp(r'\s*#\s*'), ' ');
+
+    // Expand street-type abbreviation at the start of the query
+    result = result.replaceFirstMapped(
+      RegExp(r'^(Cr|Cra|Cl|Dg|Tv|Tr|Av|Ak)\b', caseSensitive: false),
+      (m) => switch (m[0]!.toLowerCase()) {
+        'cr' || 'cra' => 'Carrera',
+        'cl' => 'Calle',
+        'dg' => 'Diagonal',
+        'tv' || 'tr' => 'Transversal',
+        'av' => 'Avenida',
+        'ak' => 'Autopista',
+        _ => m[0]!,
+      },
+    );
+
+    return result.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   Future<void> planRoute({

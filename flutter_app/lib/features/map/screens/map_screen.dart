@@ -1040,7 +1040,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
             ),
 
-          // Waiting actions (top) — main CTA should be visible immediately
+          // Waiting actions (top) — info + cancel only
           if (!isOnTrip && waitingRoute != null)
             Positioned(
               left: 0,
@@ -1052,30 +1052,66 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: _WaitingActionBar(
                     route: waitingRoute,
-                    onBoard: () => context.push('/trip/confirm?routeId=${waitingRoute.id}'),
-                    onCancel: () => ref.read(selectedWaitingRouteProvider.notifier).state = null,
+                    alertActive: _alertActive,
+                    onCancel: () {
+                      final returnPath = ref.read(waitingReturnPathProvider);
+                      ref.read(selectedWaitingRouteProvider.notifier).state = null;
+                      ref.read(waitingReturnPathProvider.notifier).state = null;
+                      if (returnPath != null) context.go(returnPath);
+                    },
                   ),
                 ),
               ),
             ),
 
-          // Waiting ETA overlay — bottom status/info
+          // Waiting ETA + boarding FAB — stacked above banner
           if (!isOnTrip && waitingRoute != null)
             Positioned(
               left: 0,
               right: 0,
               bottom: 12,
-              child: _WaitingBanner(
-                route: waitingRoute,
-                polled: _waitingPolled,
-                etaMinutes: _waitingEtaMinutes,
-                distanceMeters: _waitingDistanceM,
-                nearbyBusCount: _nearbyBusCount,
-                alertActive: _alertActive,
-                alertLoading: _alertLoading,
-                onActivateAlert: _alertLoading
-                    ? null
-                    : () => _activateWaitingAlert(waitingRoute.id),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(32, 0, 32, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: FilledButton.icon(
+                        onPressed: () => context.push('/trip/confirm?routeId=${waitingRoute.id}'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.success,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 8,
+                        ),
+                        icon: const Icon(Icons.directions_bus, size: 22),
+                        label: const Text(
+                          AppStrings.boardedWaitingButton,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  _WaitingBanner(
+                    route: waitingRoute,
+                    polled: _waitingPolled,
+                    etaMinutes: _waitingEtaMinutes,
+                    distanceMeters: _waitingDistanceM,
+                    nearbyBusCount: _nearbyBusCount,
+                    alertActive: _alertActive,
+                    alertLoading: _alertLoading,
+                    onActivateAlert: _alertLoading
+                        ? null
+                        : () => _activateWaitingAlert(waitingRoute.id),
+                  ),
+                ],
               ),
             ),
           // Active feed bar — hidden during waiting and trip
@@ -1085,7 +1121,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               right: 0,
               bottom: 12,
               child: ActiveFeedBar(
-                routes: ready.activeFeedRoutes,
+                activeFeedRoutes: ready.activeFeedRoutes,
                 onSelectRoute: (route) {
                   ref.read(selectedFeedRouteProvider.notifier).state = route;
                 },
@@ -1257,7 +1293,7 @@ class _WaitingBanner extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text(
                               AppStrings.waitingAlertActive,
-                              style: AppTextStyles.caption.copyWith(color: AppColors.success),
+                              style: AppTextStyles.caption.copyWith(color: Colors.white),
                             ),
                           ],
                         ),
@@ -1279,12 +1315,12 @@ class _WaitingBanner extends StatelessWidget {
 
 class _WaitingActionBar extends StatelessWidget {
   final BusRoute route;
-  final VoidCallback onBoard;
+  final bool alertActive;
   final VoidCallback onCancel;
 
   const _WaitingActionBar({
     required this.route,
-    required this.onBoard,
+    required this.alertActive,
     required this.onCancel,
   });
 
@@ -1298,7 +1334,11 @@ class _WaitingActionBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Row(
           children: <Widget>[
-            const Icon(Icons.notifications_active, color: Colors.amber, size: 18),
+            Icon(
+              alertActive ? Icons.check_circle : Icons.notifications_active,
+              color: alertActive ? AppColors.success : Colors.amber,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -1325,37 +1365,18 @@ class _WaitingActionBar extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                FilledButton.icon(
-                  onPressed: onBoard,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.success,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  icon: const Icon(Icons.directions_bus, size: 16),
-                  label: const Text(
-                    AppStrings.boardedWaitingButton,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                TextButton(
-                  onPressed: onCancel,
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white70,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(AppStrings.waitingCancel, style: TextStyle(fontSize: 12)),
-                ),
-              ],
+            FilledButton(
+              onPressed: onCancel,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white24,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
+              ),
+              child: const Text(AppStrings.waitingCancel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
             ),
           ],
         ),

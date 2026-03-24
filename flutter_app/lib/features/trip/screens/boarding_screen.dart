@@ -191,18 +191,14 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
               ),
             ),
             Expanded(
-              child: ListView.separated(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
                 itemCount: filtered.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final route = filtered[index];
-
-                  return ListTile(
-                    onTap: () => _showRoutePreview(filtered[index]),
-                    title: Text(route.name),
-                    subtitle: Text(route.companyName ?? route.company ?? ''),
-                    leading: RouteCodeBadge(code: route.code),
-                    trailing: const Icon(Icons.chevron_right),
+                  return _RouteListCard(
+                    route: route,
+                    onTap: () => _showRoutePreview(route),
                   );
                 },
               ),
@@ -225,18 +221,16 @@ class _NearbyRouteCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final company = route.companyName ?? route.company ?? '';
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 200,
-        margin: const EdgeInsets.only(right: 10),
-        padding: const EdgeInsets.all(12),
+        width: 175,
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border(
-            left: BorderSide(color: AppColors.forRouteCode(route.code), width: 4),
-          ),
+          borderRadius: BorderRadius.circular(12),
           boxShadow: const <BoxShadow>[
             BoxShadow(
               color: Color(0x14000000),
@@ -248,22 +242,107 @@ class _NearbyRouteCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            RouteCodeBadge(code: route.code),
+            Row(
+              children: <Widget>[
+                RouteCodeBadge(code: route.code),
+                const Spacer(),
+                const Icon(Icons.directions_bus, size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 2),
+                const Icon(Icons.chevron_right, size: 16, color: AppColors.textSecondary),
+              ],
+            ),
             const SizedBox(height: 6),
             Text(
               route.name,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
             ),
-            if ((route.companyName ?? route.company ?? '').isNotEmpty)
+            if (company.isNotEmpty)
               Text(
-                route.companyName ?? route.company ?? '',
+                'Operador: $company',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
+                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RouteListCard extends StatelessWidget {
+  final BusRoute route;
+  final VoidCallback onTap;
+
+  const _RouteListCard({required this.route, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final company = route.companyName ?? route.company ?? '';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 6,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                RouteCodeBadge(code: route.code),
+                const SizedBox(width: 10),
+                const Icon(Icons.directions_bus, size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        route.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      if (company.isNotEmpty)
+                        Text(
+                          'Operador: $company',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, size: 18, color: AppColors.textSecondary),
+              ],
+            ),
+          ),
         ),
       ),
     );

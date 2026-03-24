@@ -27,7 +27,7 @@ El sistema tiene una **economía de créditos** para incentivar la participació
 | Web frontend | React + Vite + TailwindCSS + Leaflet |
 | App móvil | Flutter 3 + Dart (`flutter_app/`) |
 | Pagos | Wompi (pagos colombianos) |
-| Geocodificación | Nominatim (primario) + Google Maps (secundario) + Geoapify (fallback web) |
+| Geocodificación | Nominatim + Photon (paralelo, Flutter) · Geoapify (fallback web) |
 | Mapas móvil | flutter_map 7 + OpenStreetMap |
 | Mapas web | Leaflet |
 
@@ -156,7 +156,13 @@ ShellRoute (BottomNavigationBar 4 tabs):
 
 ### 3. Planificador de viaje
 1. `PlannerScreen` — auto-setea origen a GPS al cargar
-2. Búsqueda de dirección → Nominatim (bbox BQ) + normalización colombiana ("Cr 52 N 45" → "Cr 52 #45")
+2. Búsqueda de dirección — `PlannerNotifier.searchAddress()`:
+   - Nominatim y Photon corren **en paralelo** (`Future.wait`)
+   - Nominatim: abreviaturas expandidas ("Cr" → "Carrera") + `#` removido + "Barranquilla Colombia" appended
+   - Photon: query + "Barranquilla" + bbox AMB; retorna GeoJSON de POIs
+   - Resultados mergeados, Nominatim primero, Photon append sin duplicados
+   - Nominatim bloqueado 30s tras 429; caché solo guarda resultados no vacíos
+   - Debounce 1100ms para respetar rate limit Nominatim (1 req/s)
 3. Ícono de mapa en campo → `/map-pick?lat=X&lng=Y` → crosshair → geocodificación inversa → regresa resultado
 4. "Buscar rutas" → `POST /api/routes/plan` → `PlannerResults`
 5. Tap resultado → `context.push('/trip/confirm?routeId=X&destLat=Y&destLng=Z')`
@@ -1275,4 +1281,18 @@ Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean e
 **Ajuste:** el subtítulo ahora muestra **solo la ciudad** del AMB (Barranquilla, Soledad, Malambo, Puerto Colombia, Galapa).
 **Ambigüedad:** el subtítulo solo aparece cuando hay **resultados con el mismo nombre base**, y se resalta para facilitar la elección.
 
-*Última actualización: 2026-03-23 (v58)*
+## Planner — Historial de búsqueda frecuente (2026-03-23) ✅
+
+**Archivos nuevos:**
+- `lib/features/planner/models/search_history_entry.dart` — model `SearchHistoryEntry` (`displayName`, `lat`, `lng`, `count`, `lastUsed`) con serialización JSON
+- `lib/features/planner/providers/search_history_provider.dart` — `SearchHistoryNotifier` (AsyncNotifier), guarda hasta 50 entradas en SharedPreferences (`search_history_v1`), expone top 5, método `record(displayName, lat, lng)`
+
+**Archivos modificados:**
+- `lib/features/planner/widgets/address_search_field.dart` — nuevo param `history: List<SearchHistoryEntry>`. Cuando el campo está vacío y enfocado muestra dropdown con historial (icono history + tiempo relativo). Cuando hay resultados Nominatim, los que coinciden con el historial muestran icono + tiempo relativo en accent color.
+- `lib/features/planner/screens/planner_screen.dart` — watch `searchHistoryProvider`, pasa `history` a ambos `AddressSearchField`, wrappea `onSelect` y `onPickFromMap` para llamar `historyNotifier.record()` en cada selección.
+
+**Lógica de sort:** entradas de los últimos 30 días primero (por count desc), luego las más antiguas (por count desc). Top 5 al usuario.
+**Tiempo relativo:** hoy / ayer / hace N días / hace N semanas.
+**Exclusión:** nunca se guarda `AppStrings.currentLocationLabel` (ubicación GPS).
+
+*Última actualización: 2026-03-23 (v59)*

@@ -162,8 +162,33 @@ Historial detallado de fases. Para el estado actual ver `CLAUDE.md` (fases) y `A
 
 App Flutter feature-complete, produciendo APKs de release. Ver `AI_CONTEXT.md` y `flutter_specs/` para detalles.
 
+**Geocodificación dual Nominatim + Photon (2026-03-24, Spec 54):**
+
+- Nominatim y Photon corren **en paralelo** por cada búsqueda — resultados mergeados sin duplicados
+- Photon cubre POIs y lugares coloquiales que Nominatim no encuentra (conjuntos, canchas, comercios)
+- Nominatim recibe abreviaturas expandidas: "Cr" → "Carrera", "Cl" → "Calle", "Dg" → "Diagonal", etc.
+- Carácter `#` removido de la query Nominatim (OSM almacena "Carrera 14 45", no "Cr 14 # 45")
+- Caché solo guarda resultados no vacíos (antes cacheaba `[]` bloqueando búsquedas futuras)
+- Cooldown 30s en Nominatim tras 429; debounce subido a 1100ms para respetar 1 req/s
+- `photonDioProvider`: baseUrl `https://photon.komoot.io`, timeouts 6s
+- `_expandForNominatim()`: expande tipo de vía + quita separador `#`
+- `_fetchNominatimBestEffort()`: 1 sola request Nominatim (antes hacía 2, duplicando 429s)
+
+**UX improvements (2026-03-23):**
+
+- **Historial de búsqueda en planner** — al enfocar campo de origen/destino vacío aparece dropdown con los 5 lugares más frecuentes (ícono reloj + barrio + tiempo relativo: hoy/ayer/hace N días). Al escribir, resultados Nominatim que ya usaste se marcan con ícono dorado. Datos en SharedPreferences (`search_history_v1`), sort por recencia 30 días + frecuencia. Nunca guarda "Ubicación actual".
+- **Bug fix planner** — el panel "No encontramos ese lugar" ya no persiste después de seleccionar desde el mapa (`_lastQuery` se resetea en `didUpdateWidget`). Además se agregó botón "Mapa" directo en ese panel.
+- **Boarding screen rediseñada** — nearby cards con badge + bus icon + chevron + nombre bold + operador. Lista completa reemplaza `ListTile`+`Divider` por cards individuales con sombra (mismo lenguaje visual que referencia Moovit).
+- **Panel debug de vibración eliminado** — removido `_VibrationTestPanel` de la pantalla de perfil.
+
 **Pendiente:**
-- Firebase push notifications con app cerrada (busNearby ya funciona en background)
 - Google Play publishing (requiere google-services.json + SHA-1 Firebase)
 - Flujo de pago Wompi in-app (actualmente abre browser)
 - Alianza con AMB y SIBUS Barranquilla
+
+**Push notifications — implementado (ver AI_CONTEXT.md §FCM token refresh Spec 51):**
+- Firebase Admin en backend + `pushNotificationService.ts`
+- FCM token guardado en DB al login, rotación automática vía `onTokenRefresh`
+- Push cuando bus entra a 300m del usuario esperando
+- Push en reportes, trancón despejado, bajada (400m / 200m), fin de viaje
+- `notification_prefs` por usuario controla qué tipos recibe

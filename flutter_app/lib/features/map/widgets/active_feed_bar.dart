@@ -7,28 +7,28 @@ import '../../../shared/extensions/datetime_extensions.dart';
 import '../../../shared/widgets/route_code_badge.dart';
 
 class ActiveFeedBar extends StatelessWidget {
-  final List<BusRoute> routes;
+  final List<BusRoute> activeFeedRoutes;
   final ValueChanged<BusRoute> onSelectRoute;
 
   const ActiveFeedBar({
-    required this.routes,
+    required this.activeFeedRoutes,
     required this.onSelectRoute,
     super.key,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (routes.isEmpty) return const SizedBox.shrink();
+    if (activeFeedRoutes.isEmpty) return const SizedBox.shrink();
 
     return SizedBox(
       height: 120,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: routes.length,
+        itemCount: activeFeedRoutes.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, index) {
-          final route = routes[index];
+          final route = activeFeedRoutes[index];
           final minutesText = route.minutesAgo != null
               ? AppStrings.agoMinutes(route.minutesAgo!)
               : (route.lastReportAt != null ? route.lastReportAt!.timeAgo() : AppStrings.nowAgo);

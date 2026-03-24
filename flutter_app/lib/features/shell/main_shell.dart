@@ -52,6 +52,7 @@ class _MainShellState extends ConsumerState<MainShell> {
       if (next is TripActive && previous is! TripActive) {
         // Clear any pending waiting route — trip has started
         ref.read(selectedWaitingRouteProvider.notifier).state = null;
+        ref.read(waitingReturnPathProvider.notifier).state = null;
         final location = GoRouterState.of(context).matchedLocation;
         if (!location.startsWith('/trip')) {
           context.go('/trip');
@@ -60,6 +61,7 @@ class _MainShellState extends ConsumerState<MainShell> {
       // Also clear on trip end to avoid stale waiting state after finishing
       if ((next is TripIdle || next is TripEnded) && previous is TripActive) {
         ref.read(selectedWaitingRouteProvider.notifier).state = null;
+        ref.read(waitingReturnPathProvider.notifier).state = null;
       }
     });
 

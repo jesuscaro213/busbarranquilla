@@ -28,6 +28,7 @@ import '../models/nominatim_result.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/planner_notifier.dart';
 import '../providers/planner_state.dart';
+import '../providers/search_history_provider.dart';
 import '../widgets/address_search_field.dart';
 import '../widgets/plan_result_card.dart';
 
@@ -134,6 +135,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
   }
 
   void _startWaiting(BusRoute route) {
+    ref.read(waitingReturnPathProvider.notifier).state = '/planner';
     ref.read(selectedWaitingRouteProvider.notifier).state = route;
     context.go('/map');
   }
@@ -156,7 +158,10 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
 
     final state = ref.watch(plannerNotifierProvider);
     final favoritesAsync = ref.watch(favoritesProvider);
+    final historyAsync = ref.watch(searchHistoryProvider);
     final notifier = ref.read(plannerNotifierProvider.notifier);
+    final historyNotifier = ref.read(searchHistoryProvider.notifier);
+    final history = historyAsync.valueOrNull ?? const [];
 
     final selectedOrigin = switch (state) {
       PlannerIdle(selectedOrigin: final origin) => origin,
@@ -265,7 +270,11 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 label: AppStrings.originLabel,
                 initialValue: selectedOrigin?.displayName,
                 onSearch: notifier.searchAddress,
-                onSelect: notifier.setOrigin,
+                history: history,
+                onSelect: (result) {
+                  notifier.setOrigin(result);
+                  historyNotifier.record(result.displayName, result.lat, result.lng);
+                },
                 onPickFromMap: () async {
                   final lat = selectedOrigin?.lat;
                   final lng = selectedOrigin?.lng;
@@ -273,6 +282,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                   final result = await context.push<NominatimResult>('/map-pick$query');
                   if (result != null) {
                     notifier.setOrigin(result);
+                    historyNotifier.record(result.displayName, result.lat, result.lng);
                   }
                 },
               ),
@@ -281,7 +291,11 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 label: AppStrings.destLabel,
                 initialValue: selectedDest?.displayName,
                 onSearch: notifier.searchAddress,
-                onSelect: notifier.setDestination,
+                history: history,
+                onSelect: (result) {
+                  notifier.setDestination(result);
+                  historyNotifier.record(result.displayName, result.lat, result.lng);
+                },
                 onPickFromMap: () async {
                   final lat = selectedDest?.lat;
                   final lng = selectedDest?.lng;
@@ -289,6 +303,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                   final result = await context.push<NominatimResult>('/map-pick$query');
                   if (result != null) {
                     notifier.setDestination(result);
+                    historyNotifier.record(result.displayName, result.lat, result.lng);
                   }
                 },
               ),

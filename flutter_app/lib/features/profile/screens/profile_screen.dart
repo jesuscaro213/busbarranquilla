@@ -1,8 +1,5 @@
-import 'dart:async' show unawaited;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:vibration/vibration.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart' show Share;
@@ -248,11 +245,6 @@ class _ProfileReadyView extends ConsumerWidget {
                   PremiumCard(user: user),
 
                   const SizedBox(height: 24),
-
-                  // ── [DEBUG] Vibration test panel ────────────────────
-                  const _VibrationTestPanel(),
-
-                  const SizedBox(height: 16),
 
                   // ── Logout ──────────────────────────────────────────
                   AppButton.destructive(
@@ -532,173 +524,6 @@ class _NotificationsSection extends ConsumerWidget {
           const SizedBox(height: 6),
         ],
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// [DEBUG] Vibration test panel — remove before production release
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _VibrationTestPanel extends StatefulWidget {
-  const _VibrationTestPanel();
-
-  @override
-  State<_VibrationTestPanel> createState() => _VibrationTestPanelState();
-}
-
-class _VibrationTestPanelState extends State<_VibrationTestPanel> {
-  final List<String> _lines = <String>[];
-  bool _busy = false;
-
-  void _log(String msg) {
-    debugPrint('[VIB-TEST] $msg');
-    if (mounted) setState(() => _lines.insert(0, msg));
-  }
-
-  Future<void> _run(Future<void> Function() fn) async {
-    if (_busy) return;
-    setState(() { _busy = true; _lines.clear(); });
-    try {
-      await fn();
-    } catch (e) {
-      _log('ERROR: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _testPulseShort() => _run(() async {
-    _log('Vibration pulso corto 80ms...');
-    unawaited(Vibration.vibrate(duration: 80, amplitude: 255));
-    _log('OK');
-  });
-
-  Future<void> _testPulseTriple() => _run(() async {
-    _log('Vibration x3 pulsos...');
-    unawaited(Vibration.vibrate(pattern: <int>[0, 80, 150, 80, 150, 80], intensities: <int>[0, 255, 0, 255, 0, 255]));
-    _log('OK');
-  });
-
-  Future<void> _testVibDirect() => _run(() async {
-    _log('hasVibrator check...');
-    final hasVib = await Vibration.hasVibrator();
-    _log('hasVibrator = $hasVib');
-    final hasAmp = await Vibration.hasAmplitudeControl();
-    _log('hasAmplitudeControl = $hasAmp');
-    _log('Vibration.vibrate(1000ms) sin guardar...');
-    unawaited(Vibration.vibrate(duration: 1000));
-    _log('vibrate() llamado (espera 1s)');
-  });
-
-  Future<void> _testVibForce() => _run(() async {
-    _log('Forzando vibrate(800ms, amp=255)...');
-    unawaited(Vibration.vibrate(duration: 800, amplitude: 255));
-    _log('vibrate(amp=255) llamado');
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    _log('(si no vibraste revisa Ajustes > Sonido > Vibración)');
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3CD),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFCC00)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Text(
-                '[DEBUG] Prueba de vibración',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: Color(0xFF856404),
-                ),
-              ),
-              if (_busy) ...<Widget>[
-                const SizedBox(width: 8),
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              _TestButton('Pulso 80ms', _testPulseShort),
-              _TestButton('Pulsos x3', _testPulseTriple),
-              _TestButton('Vibrate 1s', _testVibDirect),
-              _TestButton('Force amp=255', _testVibForce),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            constraints: const BoxConstraints(maxHeight: 120),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: _lines.isEmpty
-                    ? <Widget>[
-                        const Text(
-                          'Toca un botón...',
-                          style: TextStyle(color: Colors.white54, fontSize: 11),
-                        ),
-                      ]
-                    : _lines
-                        .map(
-                          (l) => Text(
-                            l,
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        )
-                        .toList(),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TestButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onPressed;
-  const _TestButton(this.label, this.onPressed);
-
-  @override
-  Widget build(BuildContext context) {
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF856404),
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        textStyle: const TextStyle(fontSize: 12),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      child: Text(label),
     );
   }
 }

@@ -2,8 +2,6 @@ import { Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import pool from '../config/database';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -50,12 +48,7 @@ interface ResolutionResult {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const data = await pdfParse(buffer);
-  return data.text;
-}
-
-async function parseResolutionWithClaude(pdfText: string): Promise<ResolutionResult> {
+async function parseResolutionWithClaude(pdfBuffer: Buffer): Promise<ResolutionResult> {
   const systemPrompt = `Eres un experto en resoluciones del AMB (Área Metropolitana de Barranquilla) para Transporte Público Colectivo (TPC).
 
 Reglas críticas:
@@ -103,7 +96,20 @@ Nota sobre es_nueva: siempre ponlo en false — el sistema backend lo verificar�
     messages: [
       {
         role: 'user',
-        content: `Procesa esta resolución del AMB y extrae todas las rutas TPC:\n\n${pdfText}`,
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: pdfBuffer.toString('base64'),
+            },
+          } as any,
+          {
+            type: 'text',
+            text: 'Procesa esta resolución del AMB y extrae todas las rutas TPC.',
+          },
+        ],
       },
     ],
   });
@@ -130,15 +136,8 @@ export const parseResolution = async (req: Request, res: Response): Promise<void
   }
 
   try {
-    // 1. Extract text from PDF
-    const pdfText = await extractTextFromPdf(req.file.buffer);
-    if (!pdfText.trim()) {
-      res.status(422).json({ message: 'No se pudo extraer texto del PDF. Verifica que no sea un PDF escaneado.' });
-      return;
-    }
-
-    // 2. Parse with Claude
-    const result = await parseResolutionWithClaude(pdfText);
+    // Claude lee el PDF directamente (texto o escaneado)
+    const result = await parseResolutionWithClaude(req.file.buffer);
 
     // 3. Verify each route against DB
     for (const ruta of result.rutas) {

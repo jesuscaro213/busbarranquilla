@@ -4,7 +4,7 @@ import RouteCompareMap from './RouteCompareMap';
 export type RutaDecision = 'pending' | 'approved' | 'rejected';
 
 interface Waypoint { lat: number; lon: number; label?: string }
-interface Itinerario { nombre: string; waypoints: Waypoint[]; rawMapPoints?: Waypoint[]; longitud_km: number }
+interface Itinerario { nombre: string; waypoints: Waypoint[]; anchorPoints?: Waypoint[]; longitud_km: number }
 interface DatosTecnicos {
   longitud_km: number;
   frecuencia_pico_min: number;

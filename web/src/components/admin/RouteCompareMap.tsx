@@ -26,17 +26,15 @@ export default function RouteCompareMap({ ruta, onClose }: Props) {
 
     const newItinerary = ruta.itinerarios[0];
 
-    // Orange dots: raw points extracted from PDF map (EPSG:3116 → WGS84, before OSRM)
-    if (newItinerary?.rawMapPoints?.length) {
-      const rawLatLngs = newItinerary.rawMapPoints.map(w => L.latLng(w.lat, w.lon));
-      L.polyline(rawLatLngs, { color: '#ea580c', weight: 3, opacity: 0.7, dashArray: '4 4' })
-        .bindTooltip('Del mapa PDF (crudo)', { sticky: true })
-        .addTo(map);
-      rawLatLngs.forEach(ll => {
-        L.circleMarker(ll, { radius: 4, color: '#ea580c', fillColor: '#ea580c', fillOpacity: 1, weight: 1 })
+    // Orange dots: geocoded anchor points (intersecciones del texto antes de OSRM) — validación de cobertura
+    if (newItinerary?.anchorPoints?.length) {
+      const anchorLatLngs = newItinerary.anchorPoints.map(w => L.latLng(w.lat, w.lon));
+      anchorLatLngs.forEach((ll, i) => {
+        L.circleMarker(ll, { radius: 5, color: '#ea580c', fillColor: '#ea580c', fillOpacity: 0.9, weight: 1 })
+          .bindTooltip(`Punto ${i + 1}`, { sticky: true })
           .addTo(map);
       });
-      allLatLngs.push(...rawLatLngs);
+      allLatLngs.push(...anchorLatLngs);
     }
 
     // Green polyline: OSRM-snapped route
@@ -89,10 +87,10 @@ export default function RouteCompareMap({ ruta, onClose }: Props) {
 
         {/* Legend */}
         <div className="flex flex-wrap gap-4 px-5 py-2 text-xs border-b bg-gray-50">
-          {ruta.itinerarios[0]?.rawMapPoints?.length ? (
+          {ruta.itinerarios[0]?.anchorPoints?.length ? (
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-6 h-1 rounded" style={{ background: '#ea580c', borderTop: '2px dashed #ea580c' }} />
-              Mapa PDF (crudo)
+              <span className="inline-block w-3 h-3 rounded-full bg-orange-600" />
+              Intersecciones geocodificadas
             </span>
           ) : null}
           <span className="flex items-center gap-1.5">

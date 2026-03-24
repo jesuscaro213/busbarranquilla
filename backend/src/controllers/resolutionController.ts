@@ -1,18 +1,8 @@
 import { Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import proj4 from 'proj4';
 import pool from '../config/database';
 import { geocodeIntersectionList } from '../services/geocodingService';
 import { fetchOSRMGeometry } from '../services/osrmService';
-
-// MAGNA-SIRGAS Colombia Bogotá Zone (EPSG:3116) → WGS84
-proj4.defs('EPSG:3116', '+proj=tmerc +lat_0=4.596200416666666 +lon_0=-74.07750791666666 +k=1 +x_0=1000000 +y_0=1000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
-
-function epsg3116toWGS84(x: number, y: number): [number, number] {
-  const [lng, lat] = proj4('EPSG:3116', 'WGS84', [x, y]);
-  return [lat, lng]; // [lat, lng] como usa el resto del proyecto
-}
-
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -26,15 +16,14 @@ interface Waypoint {
 
 interface ItinerarioRaw {
   nombre: string;
-  intersecciones: string[];          // fallback: texto del documento
-  coordsProyectadas?: [number, number][]; // [X, Y] EPSG:3116 extraídos del mapa
+  intersecciones: string[]; // "Carrera X con Calle Y, Municipio" — extraídas del texto
   longitud_km: number;
 }
 
 interface Itinerario {
   nombre: string;
-  waypoints: Waypoint[];             // ruta OSRM-snapeada (fuente principal)
-  rawMapPoints?: Waypoint[];         // puntos crudos del mapa PDF convertidos a WGS84
+  waypoints: Waypoint[];       // ruta OSRM-snapeada
+  anchorPoints?: Waypoint[];   // intersecciones geocodificadas (antes de OSRM) — para validación visual
   longitud_km: number;
 }
 
@@ -79,22 +68,20 @@ interface ResolutionResult {
 async function parseResolutionWithClaude(pdfBuffer: Buffer): Promise<ResolutionResultRaw> {
   const systemPrompt = `Eres un experto en resoluciones del AMB (Área Metropolitana de Barranquilla) para Transporte Público Colectivo (TPC).
 
-REGLAS GENERALES:
-- IGNORA todo lo relacionado con Transmetro, SITM, troncales, alimentadoras, estaciones. Solo procesa rutas TPC.
-- Procesa TODAS las páginas del documento.
+REGLAS:
+- IGNORA Transmetro, SITM, troncales, alimentadoras, estaciones BRT. Solo rutas TPC (buses colectivos).
+- Lee TODAS las páginas del documento, especialmente las tablas de itinerarios.
 
-EXTRACCIÓN DEL MAPA (MUY IMPORTANTE):
-- Muchos PDFs del AMB incluyen un mapa con la ruta dibujada y una cuadrícula de coordenadas proyectadas en los bordes (ej: 915000.000, 922500.000 en X; 1702500.000, 1710000.000 en Y). Ese sistema es EPSG:3116.
-- Si hay mapa con cuadrícula de coordenadas: traza los PUNTOS DE GIRO PRINCIPALES de cada polilínea de ruta TPC e interpola sus coordenadas proyectadas [X, Y] usando la cuadrícula como referencia.
-- Extrae entre 8 y 20 puntos por itinerario, suficientes para capturar todos los giros.
-- Ignora las polilíneas de Transmetro/SITM (suelen ser rojas o de otro color).
-- Si no hay mapa o no puedes leerlo: deja "coordsProyectadas" como array vacío [].
+EXTRACCIÓN DE INTERSECCIONES (crítico para la calidad del trazado):
+- Por cada itinerario extrae entre 10 y 20 intersecciones DE INICIO A FIN del recorrido, EN ORDEN.
+- Cubre TODO el recorrido: inicio, giros intermedios Y punto final. No dejes tramos sin cubrir.
+- Formato de cada elemento: "Carrera X con Calle Y, Municipio"
+  - Municipio correcto: Barranquilla, Soledad, Malambo o Puerto Colombia.
+  - Usa nombres exactos del documento — nunca inventes calles.
+  - Para avenidas con nombre: "Avenida El Bosque con Calle 80, Barranquilla"
+- Si el recorrido es largo (>10 km) usa los 20 puntos. Si es corto usa 10.
 
-EXTRACCIÓN DE TEXTO (fallback):
-- Del texto del documento extrae entre 4 y 8 intersecciones de calles por itinerario.
-- Formato: "Carrera X con Calle Y, Municipio". Solo nombres que aparezcan en el documento.
-
-Retorna ÚNICAMENTE JSON válido (sin markdown):
+Retorna ÚNICAMENTE JSON válido (sin markdown, sin explicaciones):
 {
   "resolucion": "string",
   "fecha": "YYYY-MM-DD",
@@ -107,8 +94,12 @@ Retorna ÚNICAMENTE JSON válido (sin markdown):
       "itinerarios": [
         {
           "nombre": "A",
-          "coordsProyectadas": [[918500, 1709200], [919800, 1706100], [917200, 1703800]],
-          "intersecciones": ["Carrera 46 con Calle 72, Barranquilla", "Carrera 38 con Calle 45, Barranquilla"],
+          "intersecciones": [
+            "Carrera 51B con Calle 79, Barranquilla",
+            "Carrera 46 con Calle 72, Barranquilla",
+            "Carrera 44 con Calle 45, Barranquilla",
+            "Carrera 38 con Calle 30, Barranquilla"
+          ],
           "longitud_km": 12.5
         }
       ],
@@ -124,7 +115,7 @@ Retorna ÚNICAMENTE JSON válido (sin markdown):
   ]
 }
 
-Nota: "es_nueva" siempre false — el sistema lo verifica contra la base de datos.`;
+"es_nueva" siempre false — el sistema lo verifica.`;
 
   const message = await anthropic.messages.create({
     model: 'claude-opus-4-6',
@@ -163,30 +154,10 @@ async function geocodeItinerarios(rutasRaw: ResolutionResultRaw['rutas']): Promi
     rutasRaw.map(async ruta => {
       const itinerarios: Itinerario[] = [];
       for (const it of ruta.itinerarios) {
-        let anchors: [number, number][] = [];
-        let rawMapPoints: Waypoint[] | undefined;
+        // Geocodificar intersecciones del texto
+        const { waypoints: anchors } = await geocodeIntersectionList(it.intersecciones);
 
-        // ── Fuente primaria: coordenadas del mapa PDF ─────────────────────
-        const coords = it.coordsProyectadas ?? [];
-        if (coords.length >= 2) {
-          const wgs84 = coords.map(([x, y]) => epsg3116toWGS84(x, y));
-          // Validar que estén dentro del bbox de Barranquilla
-          const valid = wgs84.filter(([lat, lng]) =>
-            lat > 10.7 && lat < 11.2 && lng > -75.1 && lng < -74.5
-          );
-          if (valid.length >= 2) {
-            anchors = valid;
-            rawMapPoints = valid.map(([lat, lon]) => ({ lat, lon }));
-          }
-        }
-
-        // ── Fallback: geocodificación de intersecciones del texto ─────────
-        if (anchors.length < 2 && it.intersecciones.length >= 2) {
-          const { waypoints } = await geocodeIntersectionList(it.intersecciones);
-          anchors = waypoints;
-        }
-
-        // ── OSRM: snapear a calles reales ─────────────────────────────────
+        // OSRM: trazar ruta sobre calles reales usando los anchors geocodificados
         let gpsPoints: [number, number][] = anchors;
         if (anchors.length >= 2) {
           const osrmResult = await fetchOSRMGeometry(
@@ -199,7 +170,8 @@ async function geocodeItinerarios(rutasRaw: ResolutionResultRaw['rutas']): Promi
           nombre: it.nombre,
           longitud_km: it.longitud_km,
           waypoints: gpsPoints.map(([lat, lon]) => ({ lat, lon })),
-          rawMapPoints,
+          // Anchors visibles en el mapa para que el admin valide la cobertura del recorrido
+          anchorPoints: anchors.map(([lat, lon]) => ({ lat, lon })),
         });
       }
       return itinerarios;

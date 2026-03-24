@@ -75,6 +75,9 @@ abstract final class AppStrings {
   static const currentLocationLabel = 'Mi ubicación';
   static const plannerPickPointsError = 'Selecciona origen y destino para continuar.';
   static const plannerDestRequired = 'Escribe un destino para buscar rutas.';
+  static const plannerSearching = 'Buscando lugares...';
+  static const plannerNoResults = 'No encontramos ese lugar.';
+  static const plannerNoResultsHint = 'Prueba con el mapa para ser más preciso.';
   static const favoritesTitle = 'Favoritos';
   static const noFavorites = 'Aún no tienes rutas favoritas';
   static const nearbyRoutesTitle = 'Buses en tu zona';
@@ -407,7 +410,7 @@ abstract final class AppStrings {
   static const waitingBusCount1 = '1 bus en camino';
   static String waitingBusCountN(int n) => '$n buses en camino';
   static const waitingAlertButton = 'Avisarme cuando llegue';
-  static const waitingAlertActive = 'Te avisaremos cuando llegue';
+  static const waitingAlertActive = 'Alerta activa · te avisamos cuando llegue';
   static const waitingAlertActivating = 'Activando alerta…';
   static const waitingAlertInsufficientCredits = 'Necesitas 3 créditos para activar la alerta';
   static const waitingAlertCost = '3 créditos';

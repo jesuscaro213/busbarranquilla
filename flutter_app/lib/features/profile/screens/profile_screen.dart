@@ -528,6 +528,8 @@ class _NotificationsSection extends ConsumerWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _NotifTile extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
@@ -572,3 +574,4 @@ class _NotifTile extends StatelessWidget {
     );
   }
 }
+

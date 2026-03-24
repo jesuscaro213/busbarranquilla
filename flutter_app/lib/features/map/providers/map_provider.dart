@@ -52,7 +52,7 @@ class MapNotifier extends Notifier<MapState> {
   }
 
   Future<void> _loadAll() async {
-    final pos = await LocationService.getCurrentPosition();
+    final pos = await LocationService.getBestEffortPosition();
     if (pos == null) {
       state = const MapError(AppStrings.locationRequired);
       return;

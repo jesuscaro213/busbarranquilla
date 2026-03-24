@@ -12,6 +12,7 @@ const navItems = [
   { to: '/admin/companies', label: 'Empresas', emoji: '🏢' },
   { to: '/admin/route-alerts', label: 'Alertas de rutas', emoji: '⚠️', badge: true },
   { to: '/admin/gps-reports', label: 'Reportes GPS', emoji: '📍' },
+  { to: '/admin/resolutions', label: 'Resoluciones AMB', emoji: '📄' },
 ];
 
 export default function AdminLayout() {

@@ -49,6 +49,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
   late final AnimationController _destAnimController;
   late final Animation<double> _destPulse;
 
+  ProviderSubscription<TripState>? _tripStateSub;
+  ProviderSubscription<TripState>? _desvioConfirmSub;
+
   @override
   void initState() {
     super.initState();
@@ -119,10 +122,97 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
         _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
       }
     });
+    _tripStateSub = ref.listenManual<TripState>(tripNotifierProvider, (previous, next) {
+      if (next is TripEnded) return;
+      if (next is! TripActive) return;
+      final prev = previous is TripActive ? previous : null;
+
+      // Follow GPS updates.
+      final lat = next.trip.currentLatitude;
+      final lng = next.trip.currentLongitude;
+      if (lat != null && lng != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _followUser(LatLng(lat, lng)));
+      }
+
+      // Credit gain animation.
+      final gained = next.trip.creditsEarned - (prev?.trip.creditsEarned ?? 0);
+      if (gained > 0) {
+        _creditGain = gained;
+        _creditAnimController.forward(from: 0);
+      }
+
+      if (next.showInactivityModal && prev?.showInactivityModal != true) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _showInactivityDialog());
+      }
+      if (next.desvioDetected && prev?.desvioDetected != true) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _showDesvioDialog(isRepeat: next.desvioIsRepeat),
+        );
+      }
+      if (next.showDesvioEscalate && prev?.showDesvioEscalate != true) {
+        if (!_desvioEscalateDialogShown) {
+          _desvioEscalateDialogShown = true;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _showDesvioEscalateDialog(isTranscon: next.desvioEscalateIsTranscon),
+          );
+        }
+      }
+      if (!next.showDesvioEscalate) _desvioEscalateDialogShown = false;
+      if (next.dropoffPrompt && prev?.dropoffPrompt != true) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _showDropoffPrompt());
+      }
+      if (next.showSuspiciousModal && prev?.showSuspiciousModal != true) {
+        if (!_suspiciousDialogShown) {
+          _suspiciousDialogShown = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _showSuspiciousDialog());
+        }
+      }
+      if (!next.showSuspiciousModal) _suspiciousDialogShown = false;
+
+      if (next.reportError != null && prev?.reportError != next.reportError) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AppSnackbar.show(context, next.reportError!, SnackbarType.error);
+            ref.read(tripNotifierProvider.notifier).clearReportError();
+          }
+        });
+      }
+
+      if (next.infoMessage != null && prev?.infoMessage != next.infoMessage) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AppSnackbar.show(context, next.infoMessage!, SnackbarType.info);
+            ref.read(tripNotifierProvider.notifier).clearInfoMessage();
+          }
+        });
+      }
+
+      if (next.dropoffAutoPickDestination && prev?.dropoffAutoPickDestination != true) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ref.read(tripNotifierProvider.notifier).clearDropoffAutoPickDestination();
+            _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
+          }
+        });
+      }
+      if (next.noMapPickRequested && prev?.noMapPickRequested != true) {
+        ref.read(tripNotifierProvider.notifier).clearMapPickRequest();
+        _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
+      }
+    });
+    _desvioConfirmSub = ref.listenManual<TripState>(tripNotifierProvider, (prev, next) {
+      if (next is! TripActive) return;
+      final wasConfirm = prev is TripActive && prev.desvioConfirmPending;
+      if (!wasConfirm && next.desvioConfirmPending) {
+        _showDesvioConfirmSheet();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _tripStateSub?.close();
+    _desvioConfirmSub?.close();
     _mapController.dispose();
     _creditAnimController.dispose();
     _destAnimController.dispose();
@@ -544,93 +634,6 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<TripState>(tripNotifierProvider, (previous, next) {
-      if (next is TripEnded) return;
-      if (next is! TripActive) return;
-      final prev = previous is TripActive ? previous : null;
-
-      // Follow GPS updates.
-      final lat = next.trip.currentLatitude;
-      final lng = next.trip.currentLongitude;
-      if (lat != null && lng != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _followUser(LatLng(lat, lng)));
-      }
-
-      // Credit gain animation.
-      final gained = next.trip.creditsEarned - (prev?.trip.creditsEarned ?? 0);
-      if (gained > 0) {
-        _creditGain = gained;
-        _creditAnimController.forward(from: 0);
-      }
-
-      if (next.showInactivityModal && prev?.showInactivityModal != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _showInactivityDialog());
-      }
-      if (next.desvioDetected && prev?.desvioDetected != true) {
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _showDesvioDialog(isRepeat: next.desvioIsRepeat),
-        );
-      }
-      if (next.showDesvioEscalate && prev?.showDesvioEscalate != true) {
-        if (!_desvioEscalateDialogShown) {
-          _desvioEscalateDialogShown = true;
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _showDesvioEscalateDialog(isTranscon: next.desvioEscalateIsTranscon),
-          );
-        }
-      }
-      if (!next.showDesvioEscalate) _desvioEscalateDialogShown = false;
-      if (next.dropoffPrompt && prev?.dropoffPrompt != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _showDropoffPrompt());
-      }
-      if (next.showSuspiciousModal && prev?.showSuspiciousModal != true) {
-        if (!_suspiciousDialogShown) {
-          _suspiciousDialogShown = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) => _showSuspiciousDialog());
-        }
-      }
-      if (!next.showSuspiciousModal) _suspiciousDialogShown = false;
-
-      if (next.reportError != null && prev?.reportError != next.reportError) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            AppSnackbar.show(context, next.reportError!, SnackbarType.error);
-            ref.read(tripNotifierProvider.notifier).clearReportError();
-          }
-        });
-      }
-
-      if (next.infoMessage != null && prev?.infoMessage != next.infoMessage) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            AppSnackbar.show(context, next.infoMessage!, SnackbarType.info);
-            ref.read(tripNotifierProvider.notifier).clearInfoMessage();
-          }
-        });
-      }
-
-      if (next.dropoffAutoPickDestination && prev?.dropoffAutoPickDestination != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            ref.read(tripNotifierProvider.notifier).clearDropoffAutoPickDestination();
-            _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
-          }
-        });
-      }
-      if (next.noMapPickRequested && prev?.noMapPickRequested != true) {
-        ref.read(tripNotifierProvider.notifier).clearMapPickRequest();
-        _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
-      }
-    });
-
-    ref.listen<TripState>(tripNotifierProvider, (prev, next) {
-      if (next is! TripActive) return;
-      final wasConfirm = prev is TripActive && prev.desvioConfirmPending;
-      if (!wasConfirm && next.desvioConfirmPending) {
-        _showDesvioConfirmSheet();
-      }
-    });
-
     final state = ref.watch(tripNotifierProvider);
 
     // ── Trip ended — full summary screen ─────────────────────────────────────
@@ -1122,19 +1125,19 @@ class _TripSummaryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
     final botPad = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       backgroundColor: AppColors.primaryDark,
-      body: Column(
-        children: <Widget>[
-          // Header
-          SizedBox(
-            height: topPad + 140,
-            child: Padding(
-              padding: EdgeInsets.only(top: topPad + 24),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // Header — no fixed height to avoid overflow on small screens
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Container(
                     width: 72,
@@ -1169,20 +1172,19 @@ class _TripSummaryScreen extends StatelessWidget {
                 ],
               ),
             ),
-          ),
 
-          // White card
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(20, 28, 20, botPad + 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
+            // White card
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(20, 28, 20, botPad + 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
                     // Big credits number
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 20),
@@ -1351,12 +1353,13 @@ class _TripSummaryScreen extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

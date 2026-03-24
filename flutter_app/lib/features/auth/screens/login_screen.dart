@@ -109,13 +109,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             flex: 2,
             child: SafeArea(
               bottom: false,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Image.asset('assets/icon/logo.png', width: 300, height: 300),
-                  ],
-                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final imgSize = (constraints.maxHeight * 0.85).clamp(0.0, 280.0);
+                  return Center(
+                    child: Image.asset(
+                      'assets/icon/logo.png',
+                      width: imgSize,
+                      height: imgSize,
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -128,10 +132,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
-              child: SafeArea(
-                top: false,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+              child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(24, 32, 24, MediaQuery.of(context).viewPadding.bottom + 24),
                   child: AutofillGroup(
                     child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -205,7 +207,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   ),
                 ),
-              ),
             ),
           ),
         ],

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -97,6 +98,49 @@ class LocationService {
     return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
+  }
+
+  static Future<Position?> getBestEffortPosition({
+    Duration timeLimit = const Duration(seconds: 5),
+  }) async {
+    final sw = Stopwatch()..start();
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      debugPrint('[PERF][GPS] servicio desactivado — ${sw.elapsedMilliseconds}ms');
+      return null;
+    }
+
+    final hasPermission = await requestLocationPermission();
+    if (!hasPermission) {
+      debugPrint('[PERF][GPS] sin permiso — ${sw.elapsedMilliseconds}ms');
+      return null;
+    }
+
+    try {
+      final cached = await Geolocator.getLastKnownPosition();
+      if (cached != null) {
+        debugPrint('[PERF][GPS] caché hit — ${sw.elapsedMilliseconds}ms (lat=${cached.latitude.toStringAsFixed(4)})');
+        return cached;
+      }
+    } catch (_) {
+      // Ignore permission/OS errors and fall back to a fresh fix.
+    }
+
+    debugPrint('[PERF][GPS] sin caché, solicitando fix fresco (límite ${timeLimit.inSeconds}s)...');
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: timeLimit,
+        ),
+      );
+      debugPrint('[PERF][GPS] fix fresco obtenido — ${sw.elapsedMilliseconds}ms');
+      return pos;
+    } catch (_) {
+      debugPrint('[PERF][GPS] timeout/error en fix fresco — ${sw.elapsedMilliseconds}ms');
+      return null;
+    }
   }
 
   static double distanceKm(

@@ -84,8 +84,8 @@ class _StopSelectScreenState extends ConsumerState<StopSelectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final tripState = ref.watch(tripNotifierProvider);
-    final isLoadingTrip = !widget.setDestination && tripState is TripLoading;
+    final isLoadingTrip = !widget.setDestination &&
+        ref.watch(tripNotifierProvider.select((s) => s is TripLoading));
 
     if (_loading) {
       return const Scaffold(body: LoadingIndicator());
@@ -99,7 +99,7 @@ class _StopSelectScreenState extends ConsumerState<StopSelectScreen> {
       appBar: AppBar(title: const Text(AppStrings.stopSelectTitle)),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[

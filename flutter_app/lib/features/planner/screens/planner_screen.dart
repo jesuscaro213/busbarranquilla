@@ -28,6 +28,7 @@ import '../models/nominatim_result.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/planner_notifier.dart';
 import '../providers/planner_state.dart';
+import '../providers/search_history_provider.dart';
 import '../widgets/address_search_field.dart';
 import '../widgets/plan_result_card.dart';
 
@@ -95,7 +96,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
     }
 
     // Fallback: ask GPS (happens only if map hasn't loaded yet).
-    final position = await LocationService.getCurrentPosition();
+    final position = await LocationService.getBestEffortPosition();
     if (position == null || !mounted) return;
     ref.read(plannerNotifierProvider.notifier).setOrigin(
           NominatimResult(
@@ -134,6 +135,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
   }
 
   void _startWaiting(BusRoute route) {
+    ref.read(waitingReturnPathProvider.notifier).state = '/planner';
     ref.read(selectedWaitingRouteProvider.notifier).state = route;
     context.go('/map');
   }
@@ -156,7 +158,10 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
 
     final state = ref.watch(plannerNotifierProvider);
     final favoritesAsync = ref.watch(favoritesProvider);
+    final historyAsync = ref.watch(searchHistoryProvider);
     final notifier = ref.read(plannerNotifierProvider.notifier);
+    final historyNotifier = ref.read(searchHistoryProvider.notifier);
+    final history = historyAsync.valueOrNull ?? const [];
 
     final selectedOrigin = switch (state) {
       PlannerIdle(selectedOrigin: final origin) => origin,
@@ -209,15 +214,9 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 height: 92,
                 child: switch (favoritesAsync) {
                   AsyncLoading() => const LoadingIndicator(),
-                  AsyncError() => const EmptyView(
-                      icon: Icons.favorite_border,
-                      message: AppStrings.noFavorites,
-                    ),
+                  AsyncError() => const _FavoritesEmpty(),
                   AsyncData(value: final favorites) => favorites.isEmpty
-                      ? const EmptyView(
-                          icon: Icons.favorite_border,
-                          message: AppStrings.noFavorites,
-                        )
+                      ? const _FavoritesEmpty()
                       : ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: favorites.length,
@@ -271,7 +270,11 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 label: AppStrings.originLabel,
                 initialValue: selectedOrigin?.displayName,
                 onSearch: notifier.searchAddress,
-                onSelect: notifier.setOrigin,
+                history: history,
+                onSelect: (result) {
+                  notifier.setOrigin(result);
+                  historyNotifier.record(result.displayName, result.lat, result.lng);
+                },
                 onPickFromMap: () async {
                   final lat = selectedOrigin?.lat;
                   final lng = selectedOrigin?.lng;
@@ -279,6 +282,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                   final result = await context.push<NominatimResult>('/map-pick$query');
                   if (result != null) {
                     notifier.setOrigin(result);
+                    historyNotifier.record(result.displayName, result.lat, result.lng);
                   }
                 },
               ),
@@ -287,7 +291,11 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 label: AppStrings.destLabel,
                 initialValue: selectedDest?.displayName,
                 onSearch: notifier.searchAddress,
-                onSelect: notifier.setDestination,
+                history: history,
+                onSelect: (result) {
+                  notifier.setDestination(result);
+                  historyNotifier.record(result.displayName, result.lat, result.lng);
+                },
                 onPickFromMap: () async {
                   final lat = selectedDest?.lat;
                   final lng = selectedDest?.lng;
@@ -295,6 +303,7 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                   final result = await context.push<NominatimResult>('/map-pick$query');
                   if (result != null) {
                     notifier.setDestination(result);
+                    historyNotifier.record(result.displayName, result.lat, result.lng);
                   }
                 },
               ),
@@ -401,14 +410,15 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                             const SizedBox(height: 10),
                             const Divider(height: 1),
                             const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
                                 OutlinedButton.icon(
                                   onPressed: () => _startWaiting(route),
                                   icon: const Icon(Icons.notifications_active_outlined, size: 16),
                                   label: const Text(AppStrings.waitButton),
                                 ),
+                                const SizedBox(height: 8),
                                 FilledButton.icon(
                                   onPressed: () => context.push('/trip/confirm?routeId=${route.id}'),
                                   style: FilledButton.styleFrom(
@@ -492,6 +502,33 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                 isLoading: isLoading,
                 onPressed: isLoading ? null : _onSearch,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesEmpty extends StatelessWidget {
+  const _FavoritesEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.favorite_border, size: 28, color: AppColors.textSecondary),
+            const SizedBox(height: 6),
+            Text(
+              AppStrings.noFavorites,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

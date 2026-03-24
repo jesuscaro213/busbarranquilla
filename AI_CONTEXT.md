@@ -27,7 +27,7 @@ El sistema tiene una **economía de créditos** para incentivar la participació
 | Web frontend | React + Vite + TailwindCSS + Leaflet |
 | App móvil | Flutter 3 + Dart (`flutter_app/`) |
 | Pagos | Wompi (pagos colombianos) |
-| Geocodificación | Nominatim (primario) + Google Maps (secundario) + Geoapify (fallback web) |
+| Geocodificación | Nominatim + Photon (paralelo, Flutter) · Geoapify (fallback web) |
 | Mapas móvil | flutter_map 7 + OpenStreetMap |
 | Mapas web | Leaflet |
 
@@ -156,7 +156,13 @@ ShellRoute (BottomNavigationBar 4 tabs):
 
 ### 3. Planificador de viaje
 1. `PlannerScreen` — auto-setea origen a GPS al cargar
-2. Búsqueda de dirección → Nominatim (bbox BQ) + normalización colombiana ("Cr 52 N 45" → "Cr 52 #45")
+2. Búsqueda de dirección — `PlannerNotifier.searchAddress()`:
+   - Nominatim y Photon corren **en paralelo** (`Future.wait`)
+   - Nominatim: abreviaturas expandidas ("Cr" → "Carrera") + `#` removido + "Barranquilla Colombia" appended
+   - Photon: query + "Barranquilla" + bbox AMB; retorna GeoJSON de POIs
+   - Resultados mergeados, Nominatim primero, Photon append sin duplicados
+   - Nominatim bloqueado 30s tras 429; caché solo guarda resultados no vacíos
+   - Debounce 1100ms para respetar rate limit Nominatim (1 req/s)
 3. Ícono de mapa en campo → `/map-pick?lat=X&lng=Y` → crosshair → geocodificación inversa → regresa resultado
 4. "Buscar rutas" → `POST /api/routes/plan` → `PlannerResults`
 5. Tap resultado → `context.push('/trip/confirm?routeId=X&destLat=Y&destLng=Z')`
@@ -1183,4 +1189,110 @@ Todos los calls usan `unawaited(AnalyticsService.method())` — nunca bloquean e
 - `getInitialMessage()` + `onMessageOpenedApp` en `app.dart` routean al destino correcto ✅
 - **Prerequisito producción:** variable `FIREBASE_SERVICE_ACCOUNT` debe estar configurada en Railway con el JSON de la service account de Firebase Admin SDK
 
-*Última actualización: 2026-03-18 (v43)*
+## Performance fixes (Specs 52 + 53) ✅ Implementado
+
+**Problema:** App lenta en login→mapa, apertura del planificador, creación de reportes. Causa raíz: `getCurrentPosition()` bloqueaba UI hasta 15s; listeners re-registrados en cada rebuild.
+
+**`getBestEffortPosition()` — `lib/core/location/location_service.dart`:**
+- Primero intenta `Geolocator.getLastKnownPosition()` (caché del OS, retorna en ms)
+- Solo si no hay caché hace `getCurrentPosition()` con timeout de 5s
+- Reemplaza a `getCurrentPosition()` en: `map_provider.dart`, `planner_screen.dart`, `planner_notifier.dart`, `trip_notifier.dart`
+
+**Rebuilds — listeners movidos de `build()` a `initState()`:**
+- `map_screen.dart`: `_waitingRouteSub = ref.listenManual(selectedWaitingRouteProvider, ...)` — evita re-registrar en cada rebuild del mapa
+- `active_trip_screen.dart`: `_tripStateSub` + `_desvioConfirmSub` = dos `ref.listenManual(tripNotifierProvider, ...)` — evita re-registrar los listeners más pesados (GPS follow, animaciones, diálogos) en cada actualización GPS (~30s durante viaje)
+- Ambas subscripciones se cierran en `dispose()`
+
+**`select` para rebuilds parciales** — en lugar de `ref.watch(tripNotifierProvider)` completo:
+- `map_screen.dart`, `boarding_confirm_screen.dart`, `stop_select_screen.dart`, `map_pick_screen.dart`, `main_shell.dart`
+
+**Cache Nominatim — `planner_notifier.dart`:**
+- `_searchCache: Map<String, List<NominatimResult>>` en memoria
+- `searchAddress()` consulta caché antes de hacer request; guarda resultado tras recibirlo
+- Evita peticiones duplicadas cuando el usuario tipea la misma dirección dos veces
+
+**Timeout Nominatim:** `connectTimeout` + `receiveTimeout` reducidos de 10s → **5s**
+
+## Vibración — fix HapticFeedback (2026-03-23) ✅
+
+**Problema:** `vibration` package llama directamente al motor vibratorio del hardware — emuladores no tienen motor físico, la llamada se ignora silenciosamente.
+
+**Fix:** `_vibrate()` en `trip_notifier.dart` ahora usa **dos capas**:
+1. `HapticFeedback.heavyImpact()` (primaria) — funciona en emuladores Android API 26+ y todos los dispositivos reales
+2. `Vibration.vibrate(pattern: [...])` (secundaria) — solo si `_canVibrate`, añade vibración con duración real en dispositivos físicos
+
+**`_hapticPulses(int count)`** — nuevo método en `TripNotifier`: dispara `count` impulsos `heavyImpact` con 200ms de pausa entre ellos. Usado por `_vibrate()` para replicar el patrón de pulsos.
+
+**`_vibrateWaitingAlert()`** en `map_screen.dart` — mismo patrón: 2x `HapticFeedback.heavyImpact()` + `Vibration.vibrate()` condicional.
+
+**Import añadido:** `package:flutter/services.dart` en `trip_notifier.dart` y `map_screen.dart`.
+
+## UI — espaciado en confirmaciones de viaje (2026-03-23) ✅
+
+**Problema:** Botones de confirmar ruta/parada quedaban muy pegados al borde inferior en pantallas con barra de navegación.
+
+**Fix:**
+- `boarding_confirm_screen.dart`: se añade un **extra de 16 px** al cálculo de `bottomPadding` para levantar el panel inferior y elementos flotantes.
+- `stop_select_screen.dart`: padding inferior aumentado (`EdgeInsets.fromLTRB(12, 12, 12, 24)`).
+- `active_trip_screen.dart` (`_TripSummaryScreen`): `SafeArea(bottom: false)` + header con padding superior fijo para reducir riesgo de overflow en pantallas pequeñas.
+
+## UI — MapPick button spacing (2026-03-23) ✅
+
+**Problema:** el botón "Confirmar punto" quedaba oculto por la barra inferior (gestos/nav).
+
+**Fix:** `map_pick_screen.dart` calcula `bottomPad = MediaQuery.of(context).padding.bottom` y posiciona el botón en `bottomPad + 24` para respetar el área segura.
+
+## UI — Selección de parada solo por mapa (2026-03-23) ✅
+
+**Problema:** la lista de paradas no aportaba dirección/nombre útil y el botón "Cambiar" resultaba confuso.
+
+**Fix:** en `boarding_confirm_screen.dart` se eliminó la lista modal; la selección de parada se hace **solo** desde el mapa. El texto **"Cambiar"** permanece y abre el mapa (igual que el ícono).
+
+## UI — Waiting mode bars (2026-03-23) ✅
+
+**Problema:** los botones principales de "Esperando bus" quedaban abajo y podían pasar desapercibidos.
+
+**Fix:**
+- `map_screen.dart`: nuevo **bar superior** con "Esperando bus", ruta y botones "¡Ya me subí!" / "Dejar de esperar".
+- `main_shell.dart`: el bar inferior en modo espera ahora solo muestra **"Monitoreando tu posición"**.
+ - `map_screen.dart`: el banner inferior ya no repite **"Monitoreando tu posición"** (evita duplicado).
+
+*Última actualización: 2026-03-23 (v51)*
+
+## UI — Planner search feedback (2026-03-23) ✅
+
+**Problema:** búsqueda de origen/destino se percibía lenta y no mostraba estado cuando no había resultados.
+
+**Fix:** `address_search_field.dart` ahora muestra:
+- estado de “Buscando lugares…” mientras consulta
+- estado vacío con sugerencia de usar el mapa cuando no hay resultados
+
+*Última actualización: 2026-03-23 (v52)*
+
+## Planner — Nominatim fallback for partial names (2026-03-23) ✅
+
+**Problema:** búsquedas parciales (ej. "Edgar Ren") podían devolver 0 resultados al forzar "Barranquilla Colombia".
+
+**Fix:** `planner_notifier.dart` ahora hace fallback: primero consulta con ciudad forzada, y si no hay resultados, repite con el query original sin ciudad.
+
+**Extra:** se agregaron consultas intermedias para **Soledad**, **Malambo**, **Puerto Colombia** y **Galapa** antes del fallback sin ciudad.
+**Precaución:** si el usuario incluye explícitamente una ciudad en la búsqueda, se usa **solo esa ciudad** para evitar ambigüedad en direcciones repetidas.
+**UI:** resultados muestran un subtítulo con la ciudad/dep/país (extraído de `display_name`) para elegir con más precisión.
+**Ajuste:** el subtítulo ahora muestra **solo la ciudad** del AMB (Barranquilla, Soledad, Malambo, Puerto Colombia, Galapa).
+**Ambigüedad:** el subtítulo solo aparece cuando hay **resultados con el mismo nombre base**, y se resalta para facilitar la elección.
+
+## Planner — Historial de búsqueda frecuente (2026-03-23) ✅
+
+**Archivos nuevos:**
+- `lib/features/planner/models/search_history_entry.dart` — model `SearchHistoryEntry` (`displayName`, `lat`, `lng`, `count`, `lastUsed`) con serialización JSON
+- `lib/features/planner/providers/search_history_provider.dart` — `SearchHistoryNotifier` (AsyncNotifier), guarda hasta 50 entradas en SharedPreferences (`search_history_v1`), expone top 5, método `record(displayName, lat, lng)`
+
+**Archivos modificados:**
+- `lib/features/planner/widgets/address_search_field.dart` — nuevo param `history: List<SearchHistoryEntry>`. Cuando el campo está vacío y enfocado muestra dropdown con historial (icono history + tiempo relativo). Cuando hay resultados Nominatim, los que coinciden con el historial muestran icono + tiempo relativo en accent color.
+- `lib/features/planner/screens/planner_screen.dart` — watch `searchHistoryProvider`, pasa `history` a ambos `AddressSearchField`, wrappea `onSelect` y `onPickFromMap` para llamar `historyNotifier.record()` en cada selección.
+
+**Lógica de sort:** entradas de los últimos 30 días primero (por count desc), luego las más antiguas (por count desc). Top 5 al usuario.
+**Tiempo relativo:** hoy / ayer / hace N días / hace N semanas.
+**Exclusión:** nunca se guarda `AppStrings.currentLocationLabel` (ubicación GPS).
+
+*Última actualización: 2026-03-23 (v59)*

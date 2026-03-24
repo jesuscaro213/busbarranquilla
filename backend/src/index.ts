@@ -18,6 +18,7 @@ import userRoutes from './routes/userRoutes';
 import traceRoutes from './routes/traceRoutes';
 import suggestionRoutes from './routes/suggestionRoutes';
 import paymentRoutes from './routes/paymentRoutes';
+import resolutionRoutes from './routes/resolutionRoutes';
 import { getRedisClient } from './config/redis';
 
 dotenv.config();
@@ -81,6 +82,7 @@ app.use('/api/users', generalLimiter, userRoutes);
 app.use('/api/traces', generalLimiter, traceRoutes);
 app.use('/api/suggestions', generalLimiter, suggestionRoutes);
 app.use('/api/payments', generalLimiter, paymentRoutes);
+app.use('/api/resolutions', generalLimiter, resolutionRoutes);
 
 // Ruta de prueba
 app.get('/', (_req, res) => {

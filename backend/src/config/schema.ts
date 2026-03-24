@@ -361,6 +361,9 @@ const createTables = async () => {
       console.log('👤 Usuario admin creado: admin@mibus.co');
     }
 
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS last_resolution VARCHAR(50)`);
+    await pool.query(`ALTER TABLE routes ADD COLUMN IF NOT EXISTS last_resolution_date DATE`);
+
     console.log('🎉 Base de datos lista');
 
   } catch (error) {

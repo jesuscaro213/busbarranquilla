@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vibration/vibration.dart';
 import 'package:geolocator/geolocator.dart';
@@ -57,14 +59,30 @@ class TripNotifier extends Notifier<TripState> {
     return (canVibrate: true, hasAmplitude: hasAmplitude);
   }
 
-  /// Vibrates with [pattern]. Uses [intensities] only when the device supports
-  /// amplitude control (cached at trip start); falls back to plain pattern otherwise.
+  /// Vibrates with [pattern] using the device vibration motor.
+  /// Falls back to HapticFeedback on devices without a vibrator (e.g. emulators).
   void _vibrate({required List<int> pattern, List<int>? intensities}) {
-    if (!_canVibrate) return;
-    if (intensities != null && _hasAmplitudeControl) {
-      unawaited(Vibration.vibrate(pattern: pattern, intensities: intensities));
+    if (_canVibrate) {
+      if (intensities != null && _hasAmplitudeControl) {
+        unawaited(Vibration.vibrate(pattern: pattern, intensities: intensities));
+      } else {
+        unawaited(Vibration.vibrate(pattern: pattern));
+      }
     } else {
-      unawaited(Vibration.vibrate(pattern: pattern));
+      // Emulator / no vibrator: use haptic feedback as best-effort fallback.
+      var pulseCount = 0;
+      for (var i = 1; i < pattern.length; i += 2) { pulseCount++; }
+      unawaited(_hapticPulses(pulseCount));
+    }
+  }
+
+  /// Fires [count] heavy haptic impacts with 200 ms gaps (emulator fallback).
+  Future<void> _hapticPulses(int count) async {
+    for (var i = 0; i < count; i++) {
+      await HapticFeedback.heavyImpact();
+      if (i < count - 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
     }
   }
 
@@ -243,11 +261,15 @@ class TripNotifier extends Notifier<TripState> {
   Future<void> startTrip(int routeId, {int? destinationStopId}) async {
     state = const TripLoading();
 
+    final swTrip = Stopwatch()..start();
+    debugPrint('[PERF][TRIP] iniciando viaje rutaId=$routeId...');
+
     // Request "Always allow" so the app can transmit in background.
     // This shows the system dialog with the "Allow all the time" option.
     await LocationService.requestBackgroundPermission();
 
-    final pos = await LocationService.getCurrentPosition();
+    final pos = await LocationService.getBestEffortPosition();
+    debugPrint('[PERF][TRIP] GPS listo en ${swTrip.elapsedMilliseconds}ms');
     if (pos == null) {
       state = const TripError(AppStrings.locationRequired);
       return;
@@ -263,8 +285,10 @@ class TripNotifier extends Notifier<TripState> {
     late final ActiveTrip trip;
     switch (startResult) {
       case Success<ActiveTrip>(data: final data):
+        debugPrint('[PERF][TRIP] viaje creado en backend — ${swTrip.elapsedMilliseconds}ms');
         trip = data;
       case Failure<ActiveTrip>(error: final error):
+        debugPrint('[PERF][TRIP] error al crear viaje — ${swTrip.elapsedMilliseconds}ms');
         state = TripError(error.message);
         return;
     }
@@ -312,6 +336,7 @@ class TripNotifier extends Notifier<TripState> {
     _reportsCreatedThisTrip = 0;
     _lastGpsAt = DateTime.now();
 
+    debugPrint('[PERF][TRIP] estado activo listo — total ${swTrip.elapsedMilliseconds}ms');
     unawaited(AnalyticsService.tripStarted(routeId, route.code));
     state = activeState;
 

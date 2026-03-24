@@ -614,7 +614,7 @@ export default function ResolutionProcessor() {
     formData.append('file', file);
 
     try {
-      const res = await api.post<ResolutionData>('/resolutions/parse', formData, {
+      const res = await api.post<ResolutionData>('/api/resolutions/parse', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120_000, // Claude puede tardar hasta 2 min
       });
@@ -657,7 +657,7 @@ export default function ResolutionProcessor() {
         ...r,
         approved: decisions[r.codigo] === 'approved',
       }));
-      const res = await api.post('/resolutions/apply', {
+      const res = await api.post('/api/resolutions/apply', {
         resolucion: result.resolucion,
         fecha: result.fecha,
         empresa: result.empresa,

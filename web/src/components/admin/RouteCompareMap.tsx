@@ -24,17 +24,31 @@ export default function RouteCompareMap({ ruta, onClose }: Props) {
 
     const allLatLngs: L.LatLng[] = [];
 
-    // Green polyline: new geometry from PDF (itinerary A)
     const newItinerary = ruta.itinerarios[0];
+
+    // Orange dots: raw points extracted from PDF map (EPSG:3116 → WGS84, before OSRM)
+    if (newItinerary?.rawMapPoints?.length) {
+      const rawLatLngs = newItinerary.rawMapPoints.map(w => L.latLng(w.lat, w.lon));
+      L.polyline(rawLatLngs, { color: '#ea580c', weight: 3, opacity: 0.7, dashArray: '4 4' })
+        .bindTooltip('Del mapa PDF (crudo)', { sticky: true })
+        .addTo(map);
+      rawLatLngs.forEach(ll => {
+        L.circleMarker(ll, { radius: 4, color: '#ea580c', fillColor: '#ea580c', fillOpacity: 1, weight: 1 })
+          .addTo(map);
+      });
+      allLatLngs.push(...rawLatLngs);
+    }
+
+    // Green polyline: OSRM-snapped route
     if (newItinerary?.waypoints.length) {
       const newLatLngs = newItinerary.waypoints.map(w => L.latLng(w.lat, w.lon));
       L.polyline(newLatLngs, { color: '#16a34a', weight: 4, opacity: 0.85 })
-        .bindTooltip('Nuevo (PDF)', { sticky: true })
+        .bindTooltip('Ruta OSRM (calles reales)', { sticky: true })
         .addTo(map);
       allLatLngs.push(...newLatLngs);
     }
 
-    // Blue polyline: current DB geometry (only for modifications)
+    // Blue dashed polyline: current DB geometry
     if (!ruta.es_nueva && ruta.dbData?.geometry?.length) {
       const dbLatLngs = ruta.dbData.geometry.map(([lat, lng]) => L.latLng(lat, lng));
       L.polyline(dbLatLngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '8 4' })
@@ -74,15 +88,21 @@ export default function RouteCompareMap({ ruta, onClose }: Props) {
         </div>
 
         {/* Legend */}
-        <div className="flex gap-4 px-5 py-2 text-xs border-b bg-gray-50">
+        <div className="flex flex-wrap gap-4 px-5 py-2 text-xs border-b bg-gray-50">
+          {ruta.itinerarios[0]?.rawMapPoints?.length ? (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-6 h-1 rounded" style={{ background: '#ea580c', borderTop: '2px dashed #ea580c' }} />
+              Mapa PDF (crudo)
+            </span>
+          ) : null}
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-6 h-1 bg-green-600 rounded" />
-            Nuevo trazado (PDF)
+            Ruta OSRM (calles reales)
           </span>
           {!ruta.es_nueva && (
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-6 h-1 bg-blue-600 rounded border-t-2 border-dashed" />
-              Trazado actual (DB)
+              <span className="inline-block w-6 h-1 bg-blue-600 rounded" style={{ borderTop: '2px dashed #2563eb' }} />
+              Actual (DB)
             </span>
           )}
           {ruta.es_nueva && (

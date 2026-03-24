@@ -1,6 +1,17 @@
 import { Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import proj4 from 'proj4';
 import pool from '../config/database';
+import { geocodeIntersectionList } from '../services/geocodingService';
+import { fetchOSRMGeometry } from '../services/osrmService';
+
+// MAGNA-SIRGAS Colombia Bogotá Zone (EPSG:3116) → WGS84
+proj4.defs('EPSG:3116', '+proj=tmerc +lat_0=4.596200416666666 +lon_0=-74.07750791666666 +k=1 +x_0=1000000 +y_0=1000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+
+function epsg3116toWGS84(x: number, y: number): [number, number] {
+  const [lng, lat] = proj4('EPSG:3116', 'WGS84', [x, y]);
+  return [lat, lng]; // [lat, lng] como usa el resto del proyecto
+}
 
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -13,9 +24,17 @@ interface Waypoint {
   label?: string;
 }
 
+interface ItinerarioRaw {
+  nombre: string;
+  intersecciones: string[];          // fallback: texto del documento
+  coordsProyectadas?: [number, number][]; // [X, Y] EPSG:3116 extraídos del mapa
+  longitud_km: number;
+}
+
 interface Itinerario {
   nombre: string;
-  waypoints: Waypoint[];
+  waypoints: Waypoint[];             // ruta OSRM-snapeada (fuente principal)
+  rawMapPoints?: Waypoint[];         // puntos crudos del mapa PDF convertidos a WGS84
   longitud_km: number;
 }
 
@@ -39,6 +58,15 @@ interface RutaResult {
   dbData?: { id: number; name: string; geometry: [number, number][] | null } | null;
 }
 
+type RutaResultRaw = Omit<RutaResult, 'itinerarios'> & { itinerarios: ItinerarioRaw[] };
+
+interface ResolutionResultRaw {
+  resolucion: string;
+  fecha: string;
+  empresa: string;
+  rutas: RutaResultRaw[];
+}
+
 interface ResolutionResult {
   resolucion: string;
   fecha: string;
@@ -48,17 +76,25 @@ interface ResolutionResult {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-async function parseResolutionWithClaude(pdfBuffer: Buffer): Promise<ResolutionResult> {
+async function parseResolutionWithClaude(pdfBuffer: Buffer): Promise<ResolutionResultRaw> {
   const systemPrompt = `Eres un experto en resoluciones del AMB (Área Metropolitana de Barranquilla) para Transporte Público Colectivo (TPC).
 
-Reglas críticas:
+REGLAS GENERALES:
 - IGNORA todo lo relacionado con Transmetro, SITM, troncales, alimentadoras, estaciones. Solo procesa rutas TPC.
-- Para cada ruta, genera los waypoints GPS de sus itinerarios basándote en las descripciones textuales de los recorridos y en tu conocimiento de Barranquilla.
-- Cuadrícula Barranquilla: Calles van E-O (costa Norte ≈ lat 11.02, sur ≈ 10.88); Carreras van N-S (río Magdalena ≈ lng -74.76, oeste ≈ -74.92). Bbox AMB: lat 10.82–11.08, lng -74.98–-74.62.
-- Mínimo 40 waypoints GPS por itinerario, distribúyelos uniformemente a lo largo del recorrido.
-- Los waypoints deben seguir las calles reales de Barranquilla.
+- Procesa TODAS las páginas del documento.
 
-Retorna ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones) con esta estructura exacta:
+EXTRACCIÓN DEL MAPA (MUY IMPORTANTE):
+- Muchos PDFs del AMB incluyen un mapa con la ruta dibujada y una cuadrícula de coordenadas proyectadas en los bordes (ej: 915000.000, 922500.000 en X; 1702500.000, 1710000.000 en Y). Ese sistema es EPSG:3116.
+- Si hay mapa con cuadrícula de coordenadas: traza los PUNTOS DE GIRO PRINCIPALES de cada polilínea de ruta TPC e interpola sus coordenadas proyectadas [X, Y] usando la cuadrícula como referencia.
+- Extrae entre 8 y 20 puntos por itinerario, suficientes para capturar todos los giros.
+- Ignora las polilíneas de Transmetro/SITM (suelen ser rojas o de otro color).
+- Si no hay mapa o no puedes leerlo: deja "coordsProyectadas" como array vacío [].
+
+EXTRACCIÓN DE TEXTO (fallback):
+- Del texto del documento extrae entre 4 y 8 intersecciones de calles por itinerario.
+- Formato: "Carrera X con Calle Y, Municipio". Solo nombres que aparezcan en el documento.
+
+Retorna ÚNICAMENTE JSON válido (sin markdown):
 {
   "resolucion": "string",
   "fecha": "YYYY-MM-DD",
@@ -71,7 +107,8 @@ Retorna ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones) con esta e
       "itinerarios": [
         {
           "nombre": "A",
-          "waypoints": [{"lat": 10.9, "lon": -74.8, "label": "Cra 46 con Cl 72"}],
+          "coordsProyectadas": [[918500, 1709200], [919800, 1706100], [917200, 1703800]],
+          "intersecciones": ["Carrera 46 con Calle 72, Barranquilla", "Carrera 38 con Calle 45, Barranquilla"],
           "longitud_km": 12.5
         }
       ],
@@ -87,11 +124,11 @@ Retorna ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones) con esta e
   ]
 }
 
-Nota sobre es_nueva: siempre ponlo en false — el sistema backend lo verificará contra la base de datos.`;
+Nota: "es_nueva" siempre false — el sistema lo verifica contra la base de datos.`;
 
   const message = await anthropic.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 16000,
+    max_tokens: 8000,
     system: systemPrompt,
     messages: [
       {
@@ -117,9 +154,57 @@ Nota sobre es_nueva: siempre ponlo en false — el sistema backend lo verificar�
   const content = message.content[0];
   if (content.type !== 'text') throw new Error('Claude no retornó texto');
 
-  // Strip possible markdown code fences
   const raw = content.text.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(raw) as ResolutionResult;
+  return JSON.parse(raw) as ResolutionResultRaw;
+}
+
+async function geocodeItinerarios(rutasRaw: ResolutionResultRaw['rutas']): Promise<RutaResult['itinerarios'][]> {
+  return Promise.all(
+    rutasRaw.map(async ruta => {
+      const itinerarios: Itinerario[] = [];
+      for (const it of ruta.itinerarios) {
+        let anchors: [number, number][] = [];
+        let rawMapPoints: Waypoint[] | undefined;
+
+        // ── Fuente primaria: coordenadas del mapa PDF ─────────────────────
+        const coords = it.coordsProyectadas ?? [];
+        if (coords.length >= 2) {
+          const wgs84 = coords.map(([x, y]) => epsg3116toWGS84(x, y));
+          // Validar que estén dentro del bbox de Barranquilla
+          const valid = wgs84.filter(([lat, lng]) =>
+            lat > 10.7 && lat < 11.2 && lng > -75.1 && lng < -74.5
+          );
+          if (valid.length >= 2) {
+            anchors = valid;
+            rawMapPoints = valid.map(([lat, lon]) => ({ lat, lon }));
+          }
+        }
+
+        // ── Fallback: geocodificación de intersecciones del texto ─────────
+        if (anchors.length < 2 && it.intersecciones.length >= 2) {
+          const { waypoints } = await geocodeIntersectionList(it.intersecciones);
+          anchors = waypoints;
+        }
+
+        // ── OSRM: snapear a calles reales ─────────────────────────────────
+        let gpsPoints: [number, number][] = anchors;
+        if (anchors.length >= 2) {
+          const osrmResult = await fetchOSRMGeometry(
+            anchors.map(([lat, lng]) => ({ latitude: lat, longitude: lng }))
+          );
+          if (osrmResult) gpsPoints = osrmResult.points;
+        }
+
+        itinerarios.push({
+          nombre: it.nombre,
+          longitud_km: it.longitud_km,
+          waypoints: gpsPoints.map(([lat, lon]) => ({ lat, lon })),
+          rawMapPoints,
+        });
+      }
+      return itinerarios;
+    })
+  );
 }
 
 // ── Job store (in-memory — admin tool, no persistence needed) ──────────────
@@ -153,7 +238,23 @@ export const parseResolution = (req: Request, res: Response): void => {
   const buffer = req.file.buffer;
 
   parseResolutionWithClaude(buffer)
-    .then(async (result) => {
+    .then(async (raw) => {
+      // Geocodificar + OSRM para todas las rutas en paralelo
+      const allItinerarios = await geocodeItinerarios(raw.rutas);
+
+      const result: ResolutionResult = {
+        resolucion: raw.resolucion,
+        fecha: raw.fecha,
+        empresa: raw.empresa,
+        rutas: raw.rutas.map((ruta, i) => ({
+          codigo: ruta.codigo,
+          nombre: ruta.nombre,
+          es_nueva: ruta.es_nueva,
+          datos_tecnicos: ruta.datos_tecnicos,
+          itinerarios: allItinerarios[i],
+        })) as RutaResult[],
+      };
+
       for (const ruta of result.rutas) {
         const dbResult = await pool.query(
           'SELECT id, name, geometry FROM routes WHERE code = $1',

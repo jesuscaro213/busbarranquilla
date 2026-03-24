@@ -15,6 +15,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@types/jszip": "^3.4.0",
     "@types/multer": "^2.1.0",
+    "@types/pdf-parse": "^1.1.5",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
     "cheerio": "^1.1.0",
@@ -27,7 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
     "multer": "^2.1.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdf-parse": "^2.2.2",
     "pg": "^8.19.0",
     "redis": "^5.11.0",
     "socket.io": "^4.8.3"

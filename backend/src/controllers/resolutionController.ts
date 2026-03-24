@@ -2,8 +2,8 @@ import { Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import pool from '../config/database';
 
-// pdfjs-dist Node usage
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -51,19 +51,8 @@ interface ResolutionResult {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const uint8Array = new Uint8Array(buffer);
-  const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
-  const pdf = await loadingTask.promise;
-  let text = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item: any) => item.str)
-      .join(' ');
-    text += pageText + '\n';
-  }
-  return text;
+  const data = await pdfParse(buffer);
+  return data.text;
 }
 
 async function parseResolutionWithClaude(pdfText: string): Promise<ResolutionResult> {

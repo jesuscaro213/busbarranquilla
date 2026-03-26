@@ -218,6 +218,7 @@ export default function AdminRoutes() {
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [qrutaLoading, setQrutaLoading] = useState(false);
 
   // ── Modal state ─────────────────────────────────────────────────────────────
@@ -1282,6 +1283,27 @@ export default function AdminRoutes() {
     }
   }
 
+  // ── Reset all bus routes ───────────────────────────────────────────────────
+
+  async function handleResetBus() {
+    if (!window.confirm(
+      '⚠️ BORRAR TODAS LAS RUTAS DE BUS\n\n' +
+      'Esto elimina permanentemente todas las rutas, paradas y empresas.\n' +
+      '¿Continuar?'
+    )) return;
+    setResetLoading(true);
+    try {
+      const res = await routesApi.resetBusRoutes();
+      const { deleted, deletedCompanies } = res.data as { deleted: number; deletedCompanies: number };
+      setScanResult(`🗑️ Reset: ${deleted} rutas eliminadas, ${deletedCompanies} empresas eliminadas. Ahora importa desde Qruta.`);
+      await loadRoutes();
+    } catch {
+      setScanResult('❌ Error al resetear rutas');
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   // ── Import Qruta ───────────────────────────────────────────────────────────
 
   async function handleImportQruta() {
@@ -1469,8 +1491,16 @@ export default function AdminRoutes() {
         <h1 className="text-2xl font-bold text-gray-900">Rutas</h1>
         <div className="flex items-center gap-2">
           <button
+            onClick={handleResetBus}
+            disabled={resetLoading || cleanupLoading || qrutaLoading}
+            className="flex items-center gap-2 bg-rose-700 hover:bg-rose-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+            title="Borra TODAS las rutas de bus y empresas. Usar antes de re-importar desde Qruta."
+          >
+            {resetLoading ? '⏳ Borrando…' : '🗑️ Reset rutas'}
+          </button>
+          <button
             onClick={handleCleanupEmpty}
-            disabled={cleanupLoading}
+            disabled={cleanupLoading || resetLoading}
             className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
             title="Elimina rutas sin geometría y sin paradas (importadas sin datos de trazado)"
           >
@@ -1478,7 +1508,7 @@ export default function AdminRoutes() {
           </button>
           <button
             onClick={handleImportQruta}
-            disabled={qrutaLoading || cleanupLoading}
+            disabled={qrutaLoading || cleanupLoading || resetLoading}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
             title="Importa ~153 rutas con trazados GPS reales desde Qruta (2024–2026)"
           >

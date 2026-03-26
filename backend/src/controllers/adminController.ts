@@ -455,6 +455,38 @@ export const importQrutaRoutes = async (req: Request, res: Response): Promise<vo
   }
 };
 
+// DELETE /api/admin/routes/reset-bus — eliminar TODAS las rutas de bus y empresas huérfanas
+export const resetBusRoutes = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    // Delete stops first (FK constraint)
+    await pool.query(
+      `DELETE FROM stops WHERE route_id IN (SELECT id FROM routes WHERE type = 'bus')`
+    );
+    // Delete route_legs if table exists
+    await pool.query(
+      `DELETE FROM route_legs WHERE route_id IN (SELECT id FROM routes WHERE type = 'bus')`
+    ).catch(() => { /* tabla puede no existir */ });
+
+    const deleted = await pool.query<{ id: number }>(
+      `DELETE FROM routes WHERE type = 'bus' RETURNING id`
+    );
+
+    const deletedCompanies = await pool.query<{ name: string }>(
+      `DELETE FROM companies
+       WHERE id NOT IN (SELECT DISTINCT company_id FROM routes WHERE company_id IS NOT NULL)
+       RETURNING name`
+    );
+
+    res.json({
+      deleted: deleted.rows.length,
+      deletedCompanies: deletedCompanies.rows.length,
+    });
+  } catch (error) {
+    console.error('Error en reset:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 // GET /api/admin/transmetro — listar rutas Transmetro y alimentadoras
 export const listTransmetroRoutes = async (_req: Request, res: Response): Promise<void> => {
   try {

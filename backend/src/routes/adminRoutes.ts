@@ -22,6 +22,7 @@ import {
   getAdminStats,
   cleanupEmptyRoutes,
   importQrutaRoutes,
+  resetBusRoutes,
 } from '../controllers/adminController';
 import { parseRouteDescription } from '../controllers/routeDescriptionController';
 import { getAllRutaRealReports, deleteRutaRealReport } from '../controllers/routeUpdateController';
@@ -48,6 +49,7 @@ router.post('/routes/import-transmetro', authMiddleware, requireRole('admin'), i
 router.post('/routes/import-buses', authMiddleware, requireRole('admin'), importOSMBuses);
 router.post('/routes/parse-description', authMiddleware, requireRole('admin'), parseRouteDescription);
 router.delete('/routes/cleanup-empty', authMiddleware, requireRole('admin'), cleanupEmptyRoutes);
+router.delete('/routes/reset-bus', authMiddleware, requireRole('admin'), resetBusRoutes);
 router.post('/routes/import-qruta', authMiddleware, requireRole('admin'), importQrutaRoutes);
 router.get('/transmetro', authMiddleware, requireRole('admin'), listTransmetroRoutes);
 router.get('/buses', authMiddleware, requireRole('admin'), listBusRoutes);

@@ -127,6 +127,9 @@ export const routesApi = {
   cleanupEmptyRoutes: () =>
     api.delete('/api/admin/routes/cleanup-empty'),
 
+  resetBusRoutes: () =>
+    api.delete('/api/admin/routes/reset-bus'),
+
   importQruta: (opts: { dryRun?: boolean; force?: boolean } = {}) =>
     api.post('/api/admin/routes/import-qruta', opts),
 

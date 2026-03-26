@@ -127,6 +127,11 @@ function normalizeCompany(name: string): string {
     .trim();
 }
 
+/** Canonical display name: "TRASALFA" → "Trasalfa", "cootrasol ltda" → "Cootrasol Ltda" */
+function toTitleCase(name: string): string {
+  return name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // ── Fetch from Parse Server ────────────────────────────────────────────────
 
 async function fetchAllQrutaRoutes(): Promise<QrutaRoute[]> {
@@ -205,11 +210,13 @@ function filterAndDeduplicate(raw: QrutaRoute[]): FilterResult {
     const code        = group[0].name.trim();
     const companyName = group[0].company?.name ?? '';
 
+    const canonicalCompany = toTitleCase(companyName);
+
     if (group.length === 1) {
       // Unique route
       entries.push({
         code,
-        companyName,
+        companyName: canonicalCompany,
         details: (group[0].details ?? '').trim(),
         path: group[0].path,
         isReturn: false,
@@ -220,14 +227,14 @@ function filterAndDeduplicate(raw: QrutaRoute[]): FilterResult {
       const [main, ret] = group.sort((a, b) => b.path.length - a.path.length);
       entries.push({
         code,
-        companyName,
+        companyName: canonicalCompany,
         details: (main.details ?? '').trim(),
         path: main.path,
         isReturn: false,
       });
       entries.push({
         code: `${code}-R`,
-        companyName,
+        companyName: canonicalCompany,
         details: (ret.details ?? '').trim(),
         path: ret.path,
         isReturn: true,
@@ -246,11 +253,16 @@ function filterAndDeduplicate(raw: QrutaRoute[]): FilterResult {
 // ── DB helpers ─────────────────────────────────────────────────────────────
 
 async function upsertCompany(name: string): Promise<number> {
+  const canonical = toTitleCase(name);
+  // Use case-insensitive lookup to avoid "TRASALFA" vs "Trasalfa" duplicates
+  const existing = await pool.query<{ id: number }>(
+    `SELECT id FROM companies WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+    [canonical],
+  );
+  if (existing.rows.length) return existing.rows[0].id;
   const res = await pool.query<{ id: number }>(
-    `INSERT INTO companies (name) VALUES ($1)
-     ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-     RETURNING id`,
-    [name],
+    `INSERT INTO companies (name) VALUES ($1) RETURNING id`,
+    [canonical],
   );
   return res.rows[0].id;
 }

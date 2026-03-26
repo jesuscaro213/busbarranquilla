@@ -27,10 +27,7 @@ class PlanResultCard extends ConsumerWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onSelect,
-        child: Padding(
+      child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,18 +78,35 @@ class PlanResultCard extends ConsumerWidget {
                 Text('${AppStrings.frequencyLabel}: ${result.frequencyMinutes} ${AppStrings.timeUnitMinutes}'),
               const SizedBox(height: 6),
               RouteActivityBadge(routeId: result.id),
-              if (onWait != null) ...<Widget>[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: onWait,
-                  icon: const Icon(Icons.notifications_active_outlined, size: 16),
-                  label: const Text(AppStrings.waitButton),
-                ),
-              ],
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  if (onWait != null) ...<Widget>[
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onWait,
+                        icon: const Icon(Icons.notifications_active_outlined, size: 16),
+                        label: const Text(AppStrings.waitButton),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onSelect,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.directions_bus, size: 16),
+                      label: const Text(AppStrings.nearbyBoardButton),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
-      ),
     );
   }
 }

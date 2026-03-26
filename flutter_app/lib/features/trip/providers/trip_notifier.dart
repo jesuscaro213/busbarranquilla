@@ -698,16 +698,8 @@ class TripNotifier extends Notifier<TripState> {
 
     if (state is! TripActive) return;
     final active = state as TripActive;
-    final syntheticStop = Stop(
-      id: -1,
-      routeId: active.route.id,
-      name: label,
-      latitude: lat,
-      longitude: lng,
-      stopOrder: 0,
-    );
-    _startDropoffMonitor(syntheticStop, active.stops);
-    state = active.copyWith(dropoffPrompt: false);
+    _startDropoffMonitor(_resolveDestinationStop(active, lat, lng, label), active.stops);
+    state = active.copyWith(dropoffPrompt: false, pickedDestLat: lat, pickedDestLng: lng);
     unawaited(ref.read(tripsRepositoryProvider).updateDestination(lat, lng, label));
   }
 
@@ -717,18 +709,49 @@ class TripNotifier extends Notifier<TripState> {
     _noDestTimer?.cancel();
     _noDestTimer = null;
     final active = state as TripActive;
-    final syntheticStop = Stop(
-      id: -1,
-      routeId: active.route.id,
-      name: label,
-      latitude: lat,
-      longitude: lng,
-      stopOrder: 0,
-    );
-    _startDropoffMonitor(syntheticStop, active.stops);
+    _startDropoffMonitor(_resolveDestinationStop(active, lat, lng, label), active.stops);
     // Emit a new state so the flag marker on the map moves to the new destination.
-    state = active.copyWith(dropoffPrompt: false);
+    state = active.copyWith(dropoffPrompt: false, pickedDestLat: lat, pickedDestLng: lng);
     unawaited(ref.read(tripsRepositoryProvider).updateDestination(lat, lng, label));
+  }
+
+  /// Returns the nearest real stop on the route to [lat]/[lng],
+  /// filtered to the same leg (ida/regreso) the user is currently on.
+  /// Falls back to a synthetic stop only if the route has no stops loaded.
+  Stop _resolveDestinationStop(TripActive active, double lat, double lng, String label) {
+    if (active.stops.isEmpty) {
+      return Stop(id: -1, routeId: active.route.id, name: label, latitude: lat, longitude: lng, stopOrder: 0);
+    }
+
+    // Detect user's current leg from the stop nearest to their GPS position.
+    final userLat = active.trip.currentLatitude;
+    final userLng = active.trip.currentLongitude;
+    String? userLeg;
+    if (userLat != null && userLng != null) {
+      Stop nearestToUser = active.stops.first;
+      double bestUserDist = LocationService.distanceMeters(
+        active.stops.first.latitude, active.stops.first.longitude, userLat, userLng,
+      );
+      for (final stop in active.stops.skip(1)) {
+        final d = LocationService.distanceMeters(stop.latitude, stop.longitude, userLat, userLng);
+        if (d < bestUserDist) { bestUserDist = d; nearestToUser = stop; }
+      }
+      userLeg = nearestToUser.leg;
+    }
+
+    // Filter by leg; fall back to all stops if filtering leaves nothing.
+    final candidates = userLeg != null
+        ? active.stops.where((s) => s.leg == userLeg).toList()
+        : active.stops;
+    final pool = candidates.isNotEmpty ? candidates : active.stops;
+
+    Stop nearest = pool.first;
+    double bestDist = LocationService.distanceMeters(pool.first.latitude, pool.first.longitude, lat, lng);
+    for (final stop in pool.skip(1)) {
+      final d = LocationService.distanceMeters(stop.latitude, stop.longitude, lat, lng);
+      if (d < bestDist) { bestDist = d; nearest = stop; }
+    }
+    return nearest;
   }
 
   /// Sets a destination on an already-active trip and starts dropoff monitoring.

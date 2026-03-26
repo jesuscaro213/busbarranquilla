@@ -134,12 +134,35 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     final route = (routeResult as Success<BusRoute>).data;
     final stops = stopsResult is Success<List<Stop>> ? stopsResult.data : const <Stop>[];
 
-    // Auto-select nearest stop to the typed destination (not the boarding stop).
+    // Detect which leg (ida/regreso) the user is boarding on, based on the
+    // stop nearest to their current GPS position.
+    final mapState = ref.read(mapNotifierProvider);
+    final userPos = mapState is MapReady ? mapState.userPosition : null;
+    String? boardingLeg;
+    if (userPos != null && stops.isNotEmpty) {
+      Stop nearestToUser = stops.first;
+      double bestUserDist = LocationService.distanceMeters(
+        stops.first.latitude, stops.first.longitude,
+        userPos.latitude, userPos.longitude,
+      );
+      for (final s in stops.skip(1)) {
+        final d = LocationService.distanceMeters(s.latitude, s.longitude, userPos.latitude, userPos.longitude);
+        if (d < bestUserDist) { bestUserDist = d; nearestToUser = s; }
+      }
+      boardingLeg = nearestToUser.leg;
+    }
+
+    // Auto-select nearest stop to the typed destination, restricted to the
+    // boarding leg so we don't pick a stop on the opposite direction.
     int? autoSelected;
     if (widget.destLat != null && widget.destLng != null && stops.isNotEmpty) {
+      final candidates = boardingLeg != null
+          ? stops.where((s) => s.leg == boardingLeg).toList()
+          : stops;
+      final pool = candidates.isNotEmpty ? candidates : stops;
       Stop? nearest;
       double bestDist = double.infinity;
-      for (final stop in stops) {
+      for (final stop in pool) {
         final d = LocationService.distanceMeters(
           stop.latitude, stop.longitude,
           widget.destLat!, widget.destLng!,
@@ -398,6 +421,8 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
                   points: route.geometry,
                   color: AppColors.primary.withValues(alpha: 0.7),
                   strokeWidth: 5,
+                  turnaroundIdx: route.turnaroundIdx,
+                  regresoColor: AppColors.routeC.withValues(alpha: 0.7),
                 ),
               MarkerLayer(
                 markers: <Marker>[

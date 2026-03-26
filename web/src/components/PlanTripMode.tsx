@@ -100,6 +100,7 @@ async function reverseGeocode(lat: number, lng: number): Promise<string> {
 function expandColombianAddress(query: string): string {
   return query
     .replace(/\bCra\.?\s*/gi, 'Carrera ')
+    .replace(/\bCr\.?\s*/gi, 'Carrera ')
     .replace(/\bCl\.?\s*/gi, 'Calle ')
     .replace(/\bKr\.?\s*/gi, 'Carrera ')
     .replace(/\bDg\.?\s*/gi, 'Diagonal ')
@@ -131,6 +132,7 @@ function normalizeAddressSeparator(input: string): string {
 }
 
 // Parse Colombian address "Cra. 59B #79-400" or "Cra 59B #79"
+// Also handles intersection format "Calle 72 Cr 52" / "Calle 72 con Carrera 52"
 function parseColombianAddress(input: string): {
   mainStreet: string;
   crossStreet: string;
@@ -138,17 +140,30 @@ function parseColombianAddress(input: string): {
 } | null {
   const withNorm = normalizeAddressSeparator(input);
   const normalized = expandColombianAddress(withNorm);
-  // Distance part is optional: #Y-Z or just #Y
-  const match = normalized.match(/^(.+?)\s*#\s*(\d+[A-Za-z]?)(?:\s*-\s*(\d+))?/i);
-  if (!match) return null;
-  const main = match[1].trim();
-  const crossNum = match[2].trim();
-  const distance = match[3] ? parseInt(match[3], 10) : 0;
-  const mainLower = main.toLowerCase();
-  const crossType = mainLower.includes('carrera') ? 'Calle'
-    : mainLower.includes('calle') ? 'Carrera'
-    : 'Calle';
-  return { mainStreet: main, crossStreet: `${crossType} ${crossNum}`, distance };
+
+  // Pattern 1: standard address with # separator — "Carrera 52 #72-30"
+  const matchHash = normalized.match(/^(.+?)\s*#\s*(\d+[A-Za-z]?)(?:\s*-\s*(\d+))?/i);
+  if (matchHash) {
+    const main = matchHash[1].trim();
+    const crossNum = matchHash[2].trim();
+    const distance = matchHash[3] ? parseInt(matchHash[3], 10) : 0;
+    const mainLower = main.toLowerCase();
+    const crossType = mainLower.includes('carrera') ? 'Calle'
+      : mainLower.includes('calle') ? 'Carrera'
+      : 'Calle';
+    return { mainStreet: main, crossStreet: `${crossType} ${crossNum}`, distance };
+  }
+
+  // Pattern 2: two street types — "Calle 72 Carrera 52" / "Calle 72 con Carrera 52"
+  const streetTypes = '(?:Carrera|Calle|Diagonal|Transversal|Avenida)';
+  const matchTwo = normalized.match(
+    new RegExp(`^(${streetTypes}\\s+\\d+[A-Za-z]?)\\s+(?:con\\s+)?(${streetTypes}\\s+\\d+[A-Za-z]?)\\s*$`, 'i')
+  );
+  if (matchTwo) {
+    return { mainStreet: matchTwo[1].trim(), crossStreet: matchTwo[2].trim(), distance: 0 };
+  }
+
+  return null;
 }
 
 // Build a flexible regex for a Colombian street name in Overpass
@@ -450,6 +465,7 @@ export default function PlanTripMode({
   // ── Handle map-picked origin ───────────────────────────────────────────
   useEffect(() => {
     if (!mapPickedOrigin) return;
+    if (originDebounceRef.current) clearTimeout(originDebounceRef.current);
     setOriginIsGps(false);
     setOriginSuggestions([]);
     setOrigin(mapPickedOrigin);
@@ -461,6 +477,7 @@ export default function PlanTripMode({
   // ── Handle map-picked destination ─────────────────────────────────────
   useEffect(() => {
     if (!mapPickedDest) return;
+    if (destDebounceRef.current) clearTimeout(destDebounceRef.current);
     setSuggestions([]);
     setSearchError('');
     setDest(mapPickedDest);

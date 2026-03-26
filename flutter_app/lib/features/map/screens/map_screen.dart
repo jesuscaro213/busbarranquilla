@@ -958,16 +958,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ),
               // Feed route (when no active trip and not in waiting mode)
               if (!isOnTrip && selectedRoute != null && selectedRoute.geometry.isNotEmpty && waitingRoute == null)
-                RoutePolylineLayer(points: selectedRoute.geometry),
+                RoutePolylineLayer(
+                  points: selectedRoute.geometry,
+                  turnaroundIdx: selectedRoute.turnaroundIdx,
+                ),
               // Waiting route polyline
               if (!isOnTrip && waitingRoute != null && waitingRoute.geometry.isNotEmpty)
-                RoutePolylineLayer(points: waitingRoute.geometry),
+                RoutePolylineLayer(
+                  points: waitingRoute.geometry,
+                  turnaroundIdx: waitingRoute.turnaroundIdx,
+                ),
               // Active trip route — always visible during a trip
               if (activeTripGeometry.isNotEmpty)
                 RoutePolylineLayer(
                   points: activeTripGeometry,
                   color: AppColors.primary.withValues(alpha: 0.8),
                   strokeWidth: 5,
+                  turnaroundIdx: activeTrip?.route.turnaroundIdx,
+                  regresoColor: AppColors.routeC.withValues(alpha: 0.8),
                 ),
               // Destination stop marker
               if (destinationStop != null)

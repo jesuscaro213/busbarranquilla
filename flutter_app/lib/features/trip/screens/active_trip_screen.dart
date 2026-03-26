@@ -724,18 +724,38 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                   points: active.route.geometry,
                   color: AppColors.primary.withValues(alpha: 0.7),
                   strokeWidth: 5,
+                  turnaroundIdx: active.route.turnaroundIdx,
+                  regresoColor: AppColors.routeC.withValues(alpha: 0.7),
                 ),
-              if (destinationStop != null || monitorDest != null)
+              if (destinationStop != null || monitorDest != null || active.pickedDestLat != null)
                 MarkerLayer(
                   markers: <Marker>[
-                    Marker(
-                      point: destinationStop != null
-                          ? LatLng(destinationStop.latitude, destinationStop.longitude)
-                          : monitorDest!,
-                      width: 36,
-                      height: 36,
-                      child: const Icon(Icons.flag, color: AppColors.success, size: 32),
-                    ),
+                    // When user picked a destination from the map: show green flag
+                    // at their exact pick + red bus stop at the nearest stop.
+                    // Otherwise (planner boarding): single green flag at the stop.
+                    if (active.pickedDestLat != null) ...<Marker>[
+                      Marker(
+                        point: LatLng(active.pickedDestLat!, active.pickedDestLng!),
+                        width: 36,
+                        height: 36,
+                        child: const Icon(Icons.flag, color: AppColors.success, size: 32),
+                      ),
+                      if (monitorDest != null)
+                        Marker(
+                          point: monitorDest,
+                          width: 36,
+                          height: 36,
+                          child: const Icon(Icons.directions_bus, color: AppColors.error, size: 30),
+                        ),
+                    ] else if (destinationStop != null || monitorDest != null)
+                      Marker(
+                        point: destinationStop != null
+                            ? LatLng(destinationStop.latitude, destinationStop.longitude)
+                            : monitorDest!,
+                        width: 36,
+                        height: 36,
+                        child: const Icon(Icons.flag, color: AppColors.success, size: 32),
+                      ),
                   ],
                 ),
               if (userLat != null && userLng != null)

@@ -41,6 +41,10 @@ final class TripActive extends TripState {
   final String? infoMessage;
   final bool gpsLost;
   final String? occupancyState;
+  /// Exact coordinates the user picked on the map as destination (green pin).
+  /// Distinct from the nearest stop used by the dropoff monitor (red pin).
+  final double? pickedDestLat;
+  final double? pickedDestLng;
 
   const TripActive({
     required this.trip,
@@ -62,6 +66,8 @@ final class TripActive extends TripState {
     this.infoMessage,
     this.gpsLost = false,
     this.occupancyState,
+    this.pickedDestLat,
+    this.pickedDestLng,
   });
 
   TripActive copyWith({
@@ -88,6 +94,9 @@ final class TripActive extends TripState {
     bool? gpsLost,
     String? occupancyState,
     bool clearOccupancyState = false,
+    double? pickedDestLat,
+    double? pickedDestLng,
+    bool clearPickedDest = false,
   }) {
     return TripActive(
       trip: trip ?? this.trip,
@@ -109,6 +118,8 @@ final class TripActive extends TripState {
       infoMessage: clearInfoMessage ? null : (infoMessage ?? this.infoMessage),
       gpsLost: gpsLost ?? this.gpsLost,
       occupancyState: clearOccupancyState ? null : (occupancyState ?? this.occupancyState),
+      pickedDestLat: clearPickedDest ? null : (pickedDestLat ?? this.pickedDestLat),
+      pickedDestLng: clearPickedDest ? null : (pickedDestLng ?? this.pickedDestLng),
     );
   }
 }

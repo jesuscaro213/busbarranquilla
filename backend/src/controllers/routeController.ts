@@ -469,8 +469,8 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
          LEFT JOIN companies c ON c.id = r.company_id
          WHERE r.is_active = true`
       ),
-      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number }>(
-        `SELECT id, route_id, name, latitude, longitude, stop_order
+      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number; leg: string | null }>(
+        `SELECT id, route_id, name, latitude, longitude, stop_order, leg
          FROM stops ORDER BY route_id, stop_order`
       ),
       pool.query<{ route_id: number; last_report_at: string; minutes_ago: number }>(
@@ -523,13 +523,24 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
 
         // Find nearest stop to origin (boarding) and destination (alighting)
         if (stops.length > 0) {
-          let minO = Infinity, minD = Infinity;
+          let minO = Infinity;
           for (const s of stops) {
             const sLat = parseFloat(s.latitude), sLng = parseFloat(s.longitude);
             if (hasOrigin) {
               const d = haversineKm(oLat!, oLng!, sLat, sLng);
               if (d < minO) { minO = d; boardingStop = s; }
             }
+          }
+          // Find alighting stop on the same leg as boarding stop to avoid
+          // picking a regreso stop when the destination is on the ida (and vice-versa).
+          const boardingLeg = boardingStop?.leg ?? null;
+          const alightCandidates = boardingLeg
+            ? stops.filter(s => s.leg === boardingLeg)
+            : stops;
+          const alightPool = alightCandidates.length > 0 ? alightCandidates : stops;
+          let minD = Infinity;
+          for (const s of alightPool) {
+            const sLat = parseFloat(s.latitude), sLng = parseFloat(s.longitude);
             const d2 = haversineKm(dLat, dLng, sLat, sLng);
             if (d2 < minD) { minD = d2; alightingStop = s; }
           }
@@ -537,24 +548,36 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
       } else {
         // ── Fallback: stop-based for routes without geometry ─────────────────
         if (stops.length === 0) continue;
-        let minO = Infinity, minD = Infinity;
-        let boardIdx = -1, alightIdx = -1;
+        let minO = Infinity;
+        let boardIdx = -1;
         for (let i = 0; i < stops.length; i++) {
           const sLat = parseFloat(stops[i].latitude), sLng = parseFloat(stops[i].longitude);
           if (hasOrigin) {
             const d = haversineKm(oLat!, oLng!, sLat, sLng);
             if (d < minO) { minO = d; boardIdx = i; }
           }
+        }
+        if (hasOrigin && minO > 1.5) continue;  // no nearby origin stop
+        // Search alighting stop on the same leg as boarding stop
+        const fallbackBoardLeg = boardIdx >= 0 ? stops[boardIdx].leg ?? null : null;
+        const fallbackFiltered = fallbackBoardLeg ? stops.filter(s => s.leg === fallbackBoardLeg) : [];
+        const fallbackAlightPool = fallbackFiltered.length > 0 ? fallbackFiltered : stops;
+        let minD = Infinity;
+        let alightIdx = -1;
+        for (let i = 0; i < fallbackAlightPool.length; i++) {
+          const sLat = parseFloat(fallbackAlightPool[i].latitude), sLng = parseFloat(fallbackAlightPool[i].longitude);
           const d2 = haversineKm(dLat, dLng, sLat, sLng);
           if (d2 < minD) { minD = d2; alightIdx = i; }
         }
-        if (hasOrigin && minO > 1.5) continue;            // no nearby origin stop
-        if (minD > 1.5) continue;                         // no nearby dest stop
-        if (hasOrigin && alightIdx <= boardIdx) continue; // wrong direction
+        if (minD > 1.5) continue;  // no nearby dest stop
+        // Verify direction within the leg: alighting stop order must be after boarding
+        const fallbackBoardOrder = boardIdx >= 0 ? stops[boardIdx].stop_order : -1;
+        const fallbackAlightOrder = alightIdx >= 0 ? fallbackAlightPool[alightIdx].stop_order : -1;
+        if (hasOrigin && fallbackAlightOrder <= fallbackBoardOrder) continue; // wrong direction
         originDistKm = minO;
         destDistKm = minD;
         boardingStop = boardIdx >= 0 ? stops[boardIdx] : null;
-        alightingStop = alightIdx >= 0 ? stops[alightIdx] : null;
+        alightingStop = alightIdx >= 0 ? fallbackAlightPool[alightIdx] : null;
       }
 
       const report = reportByRoute[route.id];

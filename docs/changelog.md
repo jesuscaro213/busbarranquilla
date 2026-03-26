@@ -204,6 +204,22 @@ App Flutter feature-complete, produciendo APKs de release. Ver `AI_CONTEXT.md` y
 - **Boarding screen rediseñada** — nearby cards con badge + bus icon + chevron + nombre bold + operador. Lista completa reemplaza `ListTile`+`Divider` por cards individuales con sombra (mismo lenguaje visual que referencia Moovit).
 - **Panel debug de vibración eliminado** — removido `_VibrationTestPanel` de la pantalla de perfil.
 
+**Bug fixes Flutter + Backend (2026-03-26):**
+
+- **Geocodificación incompleta** — resultados de búsqueda omitían la carrera. Fix: `expandColombianAddress()` expande `Cr.` → `Carrera`; nuevo Pattern 2 en `parseColombianAddress()` detecta intersecciones de dos tipos de vía ("Calle 72 Carrera 52").
+- **Dropdown no se cerraba al seleccionar en mapa** — `PlanTripMode.tsx`: se cancela el debounce timer en el `useEffect` del map-pick para que no reaparezca el dropdown.
+- **UX cards de resultado del planificador** — `plan_result_card.dart`: eliminado `InkWell` implícito. Ahora la card siempre muestra dos botones explícitos: "Esperar bus" (OutlinedButton) y "Subir enseguida" (FilledButton verde).
+- **Parada de bajada no calculada al abordar desde vista de mapa** — `trip_notifier.dart`: `_resolveDestinationStop()` encuentra la parada real más cercana al destino en el mismo leg que el usuario, reemplazando el stop sintético `id=-1`.
+- **Dos pines en el mapa** — `trip_state.dart` + `active_trip_screen.dart`: `pickedDestLat/pickedDestLng` almacenan las coordenadas exactas elegidas por el usuario (pin verde `Icons.flag`) separadas de la parada de monitor (pin rojo `Icons.directions_bus`).
+- **Falsa detección de ruta diferente al finalizar viaje** — `tripController.ts`: cluster mínimo aumentado de 3 a 5 puntos GPS consecutivos fuera de ruta.
+- **Parada de bajada en leg incorrecto** — `boarding_confirm_screen.dart`: selección de alighting stop filtrada al leg de abordaje (GPS-based).
+- **Planificador recomienda parada de bajada en leg incorrecto** — `routeController.ts` (`getPlannerRoutes`): query de stops incluye `leg`; alighting stop buscada solo entre stops del mismo leg que el boarding stop, con fallback a todos los stops si no hay leg asignado. Aplica en path con geometría y en path de fallback.
+
+**Feature — polyline bicolor ida/regreso:**
+
+- `RoutePolylineLayer` acepta `turnaroundIdx` opcional: traza segmento de ida en azul y regreso en naranja (`#F97316`)
+- Activo en: `active_trip_screen`, `boarding_confirm_screen`, `map_screen` (selectedRoute, waitingRoute, activeTripGeometry)
+
 **Pendiente:**
 - Google Play publishing (requiere google-services.json + SHA-1 Firebase)
 - Flujo de pago Wompi in-app (actualmente abre browser)

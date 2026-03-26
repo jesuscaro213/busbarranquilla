@@ -33,11 +33,11 @@ function findOffRouteClusters(
     if (minDistToGeometryKm(point[0], point[1], geometry) > 0.2) {
       current.push(point);
     } else {
-      if (current.length >= 3) clusters.push(current);
+      if (current.length >= 5) clusters.push(current);
       current = [];
     }
   }
-  if (current.length >= 3) clusters.push(current);
+  if (current.length >= 5) clusters.push(current);
   return clusters;
 }
 

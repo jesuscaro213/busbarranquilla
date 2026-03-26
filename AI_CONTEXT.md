@@ -1371,4 +1371,28 @@ Fix: en `active_trip_screen.dart` se agrega `monitorDest` como fallback (`dropof
 - `active_trip_screen.dart`: `monitorDest` fallback para flag marker; marker layer usa `destinationStop ?? monitorDest`
 - `trip_notifier.dart` (`updateDestinationByLatLng`): agrega `state = active.copyWith(dropoffPrompt: false)` para disparar rebuild
 
-*Última actualización: 2026-03-26 (v62)*
+**Bug fix — planificador recomienda parada de bajada en leg incorrecto (2026-03-26):**
+
+Cuando el bus tiene trayectos ida/regreso por calles paralelas (ej. B10: ida por Kr 54, regreso por Kr 44), el planificador buscaba la parada de bajada entre TODAS las paradas sin filtrar por leg. Si la parada de regreso en Kr 44 estaba más cerca que la de ida en Kr 54 al destino del usuario, se recomendaba como parada de bajada aunque el usuario iba en el leg de ida.
+
+Fix en `backend/src/controllers/routeController.ts`:
+1. Se agrega `leg` al query de paradas (`SELECT ... leg FROM stops`)
+2. Después de encontrar la parada de abordaje (`boardingStop`), se filtra el pool de bajada al mismo leg (`boardingStop.leg`). Si los stops no tienen leg asignado, se usa el pool completo como fallback.
+3. En el path de fallback (sin geometría), misma lógica. La validación de dirección usa `stop_order` dentro del leg filtrado (no entre toda la lista).
+
+**Archivos modificados:**
+- `routeController.ts` (`getPlannerRoutes`): query de stops incluye `leg`; búsqueda de alighting stop es leg-aware en ambos paths (geometry y fallback)
+
+---
+
+**Feature — polyline ida/regreso con colores distintos (2026-03-26):**
+
+`RoutePolylineLayer` ahora acepta `turnaroundIdx` (opcional). Cuando se provee, divide la geometría en dos segmentos: `[0..turnaroundIdx]` en azul (ida, `AppColors.primary`) y `[turnaroundIdx..]` en naranja (regreso, `AppColors.routeC = #F97316`). El punto de giro queda en ambos segmentos para no crear brecha visual. Rutas sin `turnaroundIdx` se pintan igual que antes (un solo polyline azul).
+
+**Archivos modificados:**
+- `shared/widgets/route_polyline_layer.dart`: nuevo parámetro `turnaroundIdx` + `regresoColor`; dibuja 1 o 2 `Polyline` según corresponda
+- `active_trip_screen.dart`: pasa `turnaroundIdx: active.route.turnaroundIdx`
+- `boarding_confirm_screen.dart`: pasa `turnaroundIdx: route.turnaroundIdx`
+- `map_screen.dart`: pasa `turnaroundIdx` en los 3 call sites (selectedRoute, waitingRoute, activeTripGeometry)
+
+*Última actualización: 2026-03-26 (v64)*

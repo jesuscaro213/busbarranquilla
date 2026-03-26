@@ -22,6 +22,7 @@ interface Route {
   last_departure: string | null;
   is_active: boolean;
   geometry: [number, number][] | null;
+  turnaround_idx?: number | null;
   min_distance?: number; // km, only present from /nearby endpoint
 }
 
@@ -53,6 +54,7 @@ interface Props {
   userPosition: [number, number] | null;
   onTripChange: (active: boolean) => void;
   onRouteGeometry?: (geom: [number, number][] | null) => void;
+  onRouteTurnaroundIdx?: (idx: number | null) => void;
   onBoardingStop?: (stop: { latitude: number; longitude: number; name: string } | null) => void;
   initialRouteId?: number;
   initialDestinationStopId?: number;
@@ -116,7 +118,7 @@ function fmtTime(secs: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry, onBoardingStop, initialRouteId, initialDestinationStopId, onTripEnd }: Props) {
+export default function CatchBusMode({ userPosition, onTripChange, onRouteGeometry, onRouteTurnaroundIdx, onBoardingStop, initialRouteId, initialDestinationStopId, onTripEnd }: Props) {
   const { user } = useAuth();
 
   // Route list
@@ -218,6 +220,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     if (!activeTrip?.route_id || routes.length === 0) return;
     const route = routes.find((r) => r.id === activeTrip.route_id);
     onRouteGeometry?.(route?.geometry ?? null);
+    onRouteTurnaroundIdx?.(route?.turnaround_idx ?? null);
   }, [activeTrip, routes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Polling de ocupación cada 2 min mientras hay viaje activo ──────────
@@ -717,6 +720,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     setView('waiting');
     setRouteActivity(null);
     onRouteGeometry?.(route.geometry ?? null); // emit inmediato (puede ser null)
+    onRouteTurnaroundIdx?.(route.turnaround_idx ?? null);
     const pos = userPositionRef.current;
 
     routesApi.getActivity(route.id)
@@ -726,12 +730,14 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
     routesApi.getById(route.id).then((r) => {
       const fullRoute = r.data.route as {
         geometry?: [number, number][] | null;
+        turnaround_idx?: number | null;
         stops?: { latitude: number; longitude: number; name: string }[];
       };
 
       // re-emit geometry from full route (overrides null from list)
       if (fullRoute.geometry && fullRoute.geometry.length >= 2) {
         onRouteGeometry?.(fullRoute.geometry);
+        onRouteTurnaroundIdx?.(fullRoute.turnaround_idx ?? null);
       }
 
       const stops = fullRoute.stops ?? [];
@@ -804,6 +810,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       setSuspiciousAlert(false);
       onTripChange(true);
       onRouteGeometry?.(selectedRoute?.geometry ?? null);
+      onRouteTurnaroundIdx?.(selectedRoute?.turnaround_idx ?? null);
       onBoardingStop?.(null);
       setBoardingStop(null);
       startActiveIntervals(trip.started_at ?? new Date().toISOString());
@@ -858,6 +865,7 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
       }
       onTripChange(false);
       onRouteGeometry?.(null);
+      onRouteTurnaroundIdx?.(null);
       setView('summary');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
@@ -1235,8 +1243,8 @@ export default function CatchBusMode({ userPosition, onTripChange, onRouteGeomet
         tripLoading={tripLoading}
         onWaitReportCrowded={() => handleWaitReport('espera', 3)}
         onRequestBoardConfirm={() => setShowBoardConfirm(true)}
-        onCancelWaiting={() => { setBoardingDistanceWarning(null); setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
-        onConfirmDifferentBus={() => { setBoardingDistanceWarning(null); setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
+        onCancelWaiting={() => { setBoardingDistanceWarning(null); setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onRouteTurnaroundIdx?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
+        onConfirmDifferentBus={() => { setBoardingDistanceWarning(null); setShowBoardConfirm(false); setSelectedRoute(null); setView('list'); onRouteGeometry?.(null); onRouteTurnaroundIdx?.(null); onBoardingStop?.(null); setBoardingStop(null); }}
         onStartTrip={handleStart}
       >
         {/* Modal: usuario está lejos de la ruta */}

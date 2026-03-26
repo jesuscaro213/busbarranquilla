@@ -43,7 +43,9 @@ interface Props {
   gpsEnabled?: boolean;
   feedRouteStops?: { latitude: number; longitude: number }[];
   feedRouteGeometry?: [number, number][] | null;
+  feedRouteTurnaroundIdx?: number | null;
   activeTripGeometry?: [number, number][] | null;
+  activeTripTurnaroundIdx?: number | null;
   planOrigin?: { lat: number; lng: number } | null;
   planDest?: { lat: number; lng: number } | null;
   planRouteStops?: { latitude: number; longitude: number }[];
@@ -408,22 +410,46 @@ function PlanLayer({
   return null;
 }
 
+const IDA_COLOR     = '#1A5080';  // azul — ida
+const REGRESO_COLOR = '#F97316';  // naranja — regreso
+
+function drawBicolorPolyline(
+  map: L.Map,
+  points: [number, number][],
+  turnaroundIdx: number | null | undefined,
+  idaColor: string,
+  regresoColor: string,
+  weight: number,
+  opacity: number,
+): L.Polyline[] {
+  const split = turnaroundIdx;
+  if (!split || split <= 0 || split >= points.length) {
+    return [L.polyline(points, { color: idaColor, weight, opacity }).addTo(map)];
+  }
+  const idaPts     = points.slice(0, split + 1) as [number, number][];
+  const regresoPts = points.slice(split)         as [number, number][];
+  return [
+    L.polyline(idaPts,     { color: idaColor,     weight, opacity }).addTo(map),
+    L.polyline(regresoPts, { color: regresoColor, weight, opacity }).addTo(map),
+  ];
+}
+
 // Componente interno: dibuja la polyline de una ruta del feed
 function FeedRouteLayer({
   stops,
   geometry,
+  turnaroundIdx,
 }: {
   stops: { latitude: number; longitude: number }[];
   geometry?: [number, number][] | null;
+  turnaroundIdx?: number | null;
 }) {
   const map = useMap();
-  const polylineRef = useRef<L.Polyline | null>(null);
+  const polylinesRef = useRef<L.Polyline[]>([]);
 
   useEffect(() => {
-    if (polylineRef.current) {
-      map.removeLayer(polylineRef.current);
-      polylineRef.current = null;
-    }
+    polylinesRef.current.forEach((p) => map.removeLayer(p));
+    polylinesRef.current = [];
 
     // Usar geometry guardada si existe; fallback: línea recta entre paradas
     let points: [number, number][];
@@ -435,52 +461,38 @@ function FeedRouteLayer({
       return;
     }
 
-    polylineRef.current = L.polyline(points, {
-      color: '#7c3aed',
-      weight: 5,
-      opacity: 0.85,
-    }).addTo(map);
+    polylinesRef.current = drawBicolorPolyline(map, points, turnaroundIdx, IDA_COLOR, REGRESO_COLOR, 5, 0.85);
 
     map.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 15 });
 
     return () => {
-      if (polylineRef.current) {
-        map.removeLayer(polylineRef.current);
-        polylineRef.current = null;
-      }
+      polylinesRef.current.forEach((p) => map.removeLayer(p));
+      polylinesRef.current = [];
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops, geometry]);
+  }, [stops, geometry, turnaroundIdx]);
 
   return null;
 }
 
 // Componente interno: dibuja la polyline de la ruta durante un viaje activo
-function ActiveTripLayer({ geometry }: { geometry?: [number, number][] | null }) {
+function ActiveTripLayer({ geometry, turnaroundIdx }: { geometry?: [number, number][] | null; turnaroundIdx?: number | null }) {
   const map = useMap();
-  const polylineRef = useRef<L.Polyline | null>(null);
+  const polylinesRef = useRef<L.Polyline[]>([]);
 
   useEffect(() => {
-    if (polylineRef.current) {
-      map.removeLayer(polylineRef.current);
-      polylineRef.current = null;
-    }
+    polylinesRef.current.forEach((p) => map.removeLayer(p));
+    polylinesRef.current = [];
     if (!geometry || geometry.length < 2) return;
 
-    polylineRef.current = L.polyline(geometry, {
-      color: '#16a34a',
-      weight: 5,
-      opacity: 0.8,
-    }).addTo(map);
+    polylinesRef.current = drawBicolorPolyline(map, geometry, turnaroundIdx, IDA_COLOR, REGRESO_COLOR, 5, 0.8);
 
     return () => {
-      if (polylineRef.current) {
-        map.removeLayer(polylineRef.current);
-        polylineRef.current = null;
-      }
+      polylinesRef.current.forEach((p) => map.removeLayer(p));
+      polylinesRef.current = [];
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geometry]);
+  }, [geometry, turnaroundIdx]);
 
   return null;
 }
@@ -561,11 +573,11 @@ function RouteGeometryLayer({ filter }: { filter: RouteFilter }) {
         const isTransmetro = route.type === 'transmetro' || route.type === 'alimentadora';
         const color = isTransmetro ? (route.color || '#e60000') : '#1d4ed8';
 
-        const pl = L.polyline(
-          route.geometry.map(([lat, lng]) => [lat, lng] as L.LatLngTuple),
-          { color, weight: 3, opacity: 0.7 }
-        ).addTo(map);
-        polylinesRef.current.push(pl);
+        const pts = route.geometry.map(([lat, lng]) => [lat, lng] as [number, number]);
+        const pls = isTransmetro
+          ? [L.polyline(pts, { color, weight: 3, opacity: 0.7 }).addTo(map)]
+          : drawBicolorPolyline(map, pts, route.turnaround_idx ?? null, IDA_COLOR, REGRESO_COLOR, 3, 0.7);
+        pls.forEach((pl) => polylinesRef.current.push(pl));
       }
     }).catch(() => {});
 
@@ -652,7 +664,9 @@ export default function MapView({
   gpsEnabled = false,
   feedRouteStops = [],
   feedRouteGeometry,
+  feedRouteTurnaroundIdx,
   activeTripGeometry,
+  activeTripTurnaroundIdx,
   planOrigin,
   planDest,
   planRouteStops = [],
@@ -708,8 +722,8 @@ export default function MapView({
       <MapFlyTo center={destinationCenter} />
       {/* All-routes layer — always behind specific layers */}
       <RouteGeometryLayer filter={routeFilter} />
-      <FeedRouteLayer stops={feedRouteStops} geometry={feedRouteGeometry} />
-      <ActiveTripLayer geometry={activeTripGeometry} />
+      <FeedRouteLayer stops={feedRouteStops} geometry={feedRouteGeometry} turnaroundIdx={feedRouteTurnaroundIdx} />
+      <ActiveTripLayer geometry={activeTripGeometry} turnaroundIdx={activeTripTurnaroundIdx} />
       <BoardingMarkerLayer stop={catchBusBoardingStop} userPosition={catchBusUserPosition} />
       {routeActivityPositions.map((pos, i) => (
         <Marker

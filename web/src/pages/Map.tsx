@@ -62,9 +62,11 @@ export default function Map() {
   // Trip
   const [isOnTrip, setIsOnTrip] = useState(false);
   const [activeTripGeometry, setActiveTripGeometry] = useState<[number, number][] | null>(null);
+  const [activeTripTurnaroundIdx, setActiveTripTurnaroundIdx] = useState<number | null>(null);
 
   // Feed route geometry
   const [feedRouteGeometry, setFeedRouteGeometry] = useState<[number, number][] | null>(null);
+  const [feedRouteTurnaroundIdx, setFeedRouteTurnaroundIdx] = useState<number | null>(null);
 
   // Credits popup
   const [showCreditsPopup, setShowCreditsPopup] = useState(false);
@@ -188,8 +190,9 @@ export default function Map() {
         routesApi.getById(routeId),
       ]);
       setFeedSelectedStops(stopsRes.data.stops as FeedStop[]);
-      const geom = (routeRes.data.route as { geometry?: [number, number][] | null }).geometry ?? null;
-      setFeedRouteGeometry(geom);
+      const routeData = routeRes.data.route as { geometry?: [number, number][] | null; turnaround_idx?: number | null };
+      setFeedRouteGeometry(routeData.geometry ?? null);
+      setFeedRouteTurnaroundIdx(routeData.turnaround_idx ?? null);
       setSheetState('collapsed');
     } catch {
       // noop
@@ -408,6 +411,7 @@ export default function Map() {
                 onClick={() => {
                   setSheetMode('feed');
                   setActiveTripGeometry(null);
+                  setActiveTripTurnaroundIdx(null);
                   setCatchBusBoardingStop(null);
                   setClickedPos(null);
                   setPendingBoardRouteId(undefined);
@@ -423,12 +427,14 @@ export default function Map() {
               userPosition={userPosition}
               onTripChange={setIsOnTrip}
               onRouteGeometry={setActiveTripGeometry}
+              onRouteTurnaroundIdx={setActiveTripTurnaroundIdx}
               onBoardingStop={setCatchBusBoardingStop}
               initialRouteId={pendingBoardRouteId}
               initialDestinationStopId={pendingDestinationStopId}
               onTripEnd={() => {
                 setSheetMode('feed');
                 setActiveTripGeometry(null);
+                setActiveTripTurnaroundIdx(null);
                 setCatchBusBoardingStop(null);
                 setCatchBusModeKey((k) => k + 1);
               }}
@@ -502,7 +508,9 @@ export default function Map() {
         gpsEnabled={gpsState === 'granted'}
         feedRouteStops={feedSelectedStops}
         feedRouteGeometry={feedRouteGeometry}
+        feedRouteTurnaroundIdx={feedRouteTurnaroundIdx}
         activeTripGeometry={activeTripGeometry}
+        activeTripTurnaroundIdx={activeTripTurnaroundIdx}
         planOrigin={planOrigin}
         planDest={planDest}
         planRouteStops={planRouteStops}

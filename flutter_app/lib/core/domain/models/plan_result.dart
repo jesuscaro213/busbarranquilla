@@ -9,6 +9,7 @@ class PlanResult {
   final String? companyName;
   final String? nearestStopName;
   final String? nearestStopAddress;
+  final int? turnaroundIdx;
   final LatLng nearestStop;
   final int distanceMeters;
   final int? originDistanceMeters;
@@ -22,6 +23,7 @@ class PlanResult {
     this.companyName,
     this.nearestStopName,
     this.nearestStopAddress,
+    this.turnaroundIdx,
     required this.nearestStop,
     required this.distanceMeters,
     this.originDistanceMeters,
@@ -37,6 +39,7 @@ class PlanResult {
       companyName: asStringOrNull(json['company_name']),
       nearestStopName: asStringOrNull(json['nearest_stop_name']),
       nearestStopAddress: asStringOrNull(json['nearest_stop_address']),
+      turnaroundIdx: asIntOrNull(json['turnaround_idx']),
       nearestStop: LatLng(
         asDouble(json['nearest_stop_lat']),
         asDouble(json['nearest_stop_lng']),
@@ -56,6 +59,7 @@ class PlanResult {
       'company_name': companyName,
       'nearest_stop_name': nearestStopName,
       'nearest_stop_address': nearestStopAddress,
+      'turnaround_idx': turnaroundIdx,
       'nearest_stop_lat': nearestStop.latitude,
       'nearest_stop_lng': nearestStop.longitude,
       'distance_meters': distanceMeters,
@@ -72,6 +76,7 @@ class PlanResult {
     String? companyName,
     String? nearestStopName,
     String? nearestStopAddress,
+    int? turnaroundIdx,
     LatLng? nearestStop,
     int? distanceMeters,
     int? originDistanceMeters,
@@ -85,6 +90,7 @@ class PlanResult {
       companyName: companyName ?? this.companyName,
       nearestStopName: nearestStopName ?? this.nearestStopName,
       nearestStopAddress: nearestStopAddress ?? this.nearestStopAddress,
+      turnaroundIdx: turnaroundIdx ?? this.turnaroundIdx,
       nearestStop: nearestStop ?? this.nearestStop,
       distanceMeters: distanceMeters ?? this.distanceMeters,
       originDistanceMeters: originDistanceMeters ?? this.originDistanceMeters,

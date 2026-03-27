@@ -470,8 +470,8 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
          LEFT JOIN companies c ON c.id = r.company_id
          WHERE r.is_active = true`
       ),
-      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number; leg: string | null }>(
-        `SELECT id, route_id, name, latitude, longitude, stop_order, leg
+      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number; leg: string | null; address: string | null }>(
+        `SELECT id, route_id, name, latitude, longitude, stop_order, leg, address
          FROM stops ORDER BY route_id, stop_order`
       ),
       pool.query<{ route_id: number; last_report_at: string; minutes_ago: number }>(

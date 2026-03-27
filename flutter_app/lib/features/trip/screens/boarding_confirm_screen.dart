@@ -184,7 +184,6 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     });
 
     // Read GPS from map state (refreshed every 30s).
-    final mapState = ref.read(mapNotifierProvider);
     if (mapState is MapReady && mapState.userPosition != null && mounted) {
       setState(() => _userPosition = mapState.userPosition);
     }

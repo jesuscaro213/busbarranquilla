@@ -216,26 +216,19 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
               ),
             ),
 
-            // ── Grilla 2 columnas ──────────────────────────────────────────
+            // ── Lista de rutas ─────────────────────────────────────────────
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 1.55,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final route = filtered[index];
-                    return _RouteGridCard(
-                      route: route,
-                      onTap: () => _showRoutePreview(route),
-                    );
-                  },
-                  childCount: filtered.length,
-                ),
+              sliver: SliverList.separated(
+                itemCount: filtered.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final route = filtered[index];
+                  return _RouteListCard(
+                    route: route,
+                    onTap: () => _showRoutePreview(route),
+                  );
+                },
               ),
             ),
           ],
@@ -319,46 +312,39 @@ class _NearbyRouteCard extends StatelessWidget {
   }
 }
 
-class _RouteGridCard extends StatelessWidget {
+class _RouteListCard extends StatelessWidget {
   final BusRoute route;
   final VoidCallback onTap;
 
-  const _RouteGridCard({required this.route, required this.onTap});
+  const _RouteListCard({required this.route, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final company = route.companyName ?? route.company ?? '';
     final badgeColor = AppColors.forRouteCode(route.code);
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const <BoxShadow>[
-          BoxShadow(color: Color(0x0F000000), blurRadius: 6, offset: Offset(0, 2)),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                // Badge + icono
-                Row(
-                  children: <Widget>[
-                    RouteCodeBadge(code: route.code),
-                    const Spacer(),
-                    Icon(Icons.directions_bus, size: 14, color: badgeColor.withValues(alpha: 0.7)),
-                  ],
-                ),
-                // Nombre + operador
-                Column(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border(
+              left: BorderSide(color: badgeColor, width: 4),
+            ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(color: Color(0x0F000000), blurRadius: 6, offset: Offset(0, 2)),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: <Widget>[
+              RouteCodeBadge(code: route.code),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
@@ -366,7 +352,7 @@ class _RouteGridCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary,
                         height: 1.3,
@@ -379,15 +365,17 @@ class _RouteGridCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 10,
+                          fontSize: 11,
                           color: AppColors.textSecondary,
                         ),
                       ),
                     ],
                   ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right, size: 20, color: AppColors.textSecondary),
+            ],
           ),
         ),
       ),

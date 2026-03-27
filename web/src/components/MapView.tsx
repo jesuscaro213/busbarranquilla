@@ -553,6 +553,7 @@ interface RouteWithGeometry {
   type: string;
   color: string | null;
   geometry: [number, number][] | null;
+  turnaround_idx?: number | null;
 }
 
 function RouteGeometryLayer({ filter }: { filter: RouteFilter }) {

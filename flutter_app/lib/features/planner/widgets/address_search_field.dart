@@ -61,6 +61,7 @@ class _AddressSearchFieldState extends State<AddressSearchField> {
     if (oldWidget.initialValue != widget.initialValue && _controller.text != newText) {
       _controller.text = newText;
       _lastQuery = '';
+      _suggestions = const <NominatimResult>[];
     }
   }
 

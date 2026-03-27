@@ -3,6 +3,9 @@ import pool from '../config/database';
 import { fetchOSRMGeometry } from '../services/osrmService';
 import { computeLegsForRoute } from '../services/legService';
 
+// In-memory cache for reverse geocoded stop addresses (stops don't move)
+const _stopAddressCache = new Map<string, string>();
+
 // Listar todas las rutas activas (opcionalmente filtradas por type)
 export const listRoutes = async (req: Request, res: Response): Promise<void> => {
   const { type } = req.query;
@@ -611,6 +614,39 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
       ((a.origin_distance_meters ?? 0) + a.distance_meters) -
       ((b.origin_distance_meters ?? 0) + b.distance_meters)
     );
+
+    // Reverse geocode alighting stop for each result in parallel (best-effort, cached by coords)
+    await Promise.all(results.map(async (r) => {
+      const cacheKey = `${r.nearest_stop_lat},${r.nearest_stop_lng}`;
+      if (_stopAddressCache.has(cacheKey)) {
+        r.nearest_stop_address = _stopAddressCache.get(cacheKey);
+        return;
+      }
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${r.nearest_stop_lat}&lon=${r.nearest_stop_lng}&format=json&accept-language=es&zoom=17`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'MiBus/1.0 (mibus.co)' },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (resp.ok) {
+          const data = await resp.json() as { display_name?: string; address?: { road?: string; highway?: string; pedestrian?: string; footway?: string; suburb?: string; neighbourhood?: string; quarter?: string; city_district?: string } };
+          console.log(`[GEOCODE] stop ${cacheKey} →`, JSON.stringify(data.address));
+          const road = data.address?.road ?? data.address?.highway ?? data.address?.pedestrian ?? data.address?.footway;
+          const barrio = data.address?.suburb ?? data.address?.neighbourhood ?? data.address?.city_district ?? data.address?.quarter;
+          if (road || barrio) {
+            const address = road
+              ? (barrio ? `${road}, ${barrio}` : road)
+              : barrio!;
+            r.nearest_stop_address = address;
+            _stopAddressCache.set(cacheKey, address);
+          }
+        } else {
+          console.log(`[GEOCODE] stop ${cacheKey} → HTTP ${resp.status}`);
+        }
+      } catch (e) {
+        console.log(`[GEOCODE] stop ${cacheKey} → error: ${e}`);
+      }
+    }));
 
     res.json({ routes: results });
 

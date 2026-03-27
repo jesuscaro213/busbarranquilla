@@ -46,13 +46,16 @@ class PlannerNotifier extends Notifier<PlannerState> {
   NominatimResult? _selectedOrigin;
   NominatimResult? _selectedDest;
   bool _originIsGps = false;
+  bool _disposed = false;
   Timer? _nearbyRefreshTimer;
   final Map<String, List<NominatimResult>> _searchCache = <String, List<NominatimResult>>{};
   DateTime? _nominatimBlockedUntil;
 
   @override
   PlannerState build() {
+    _disposed = false;
     ref.onDispose(() {
+      _disposed = true;
       _nearbyRefreshTimer?.cancel();
       _nearbyRefreshTimer = null;
     });
@@ -179,6 +182,31 @@ class PlannerNotifier extends Notifier<PlannerState> {
   Future<List<NominatimResult>> _searchWithFallback(String cleanQuery) async {
     final sw = Stopwatch()..start();
     debugPrint('[PERF] buscando "$cleanQuery"...');
+
+    // ── Intersection detection (e.g. "Calle 72 Cr 50") ──────────────────────
+    final intersection = _parseIntersection(cleanQuery);
+    if (intersection != null) {
+      final main = intersection[0];
+      final cross = intersection[1];
+      debugPrint('[PERF][OVERPASS] intersección detectada: $main × $cross');
+
+      // Try Overpass (precise) and Nominatim fallback in parallel
+      final intersectionResults = await Future.wait(<Future<NominatimResult?>>[
+        _fetchOverpassIntersection(main, cross),
+        _fetchNominatimIntersection(main, cross),
+      ]);
+
+      final overpassResult = intersectionResults[0];
+      final nominatimFallback = intersectionResults[1];
+
+      final best = overpassResult ?? nominatimFallback;
+      if (best != null) {
+        debugPrint('[PERF] intersección encontrada en ${sw.elapsedMilliseconds}ms');
+        // Show the query as-is (what the user typed) instead of the expanded label
+        return <NominatimResult>[NominatimResult(displayName: cleanQuery, lat: best.lat, lng: best.lng)];
+      }
+      debugPrint('[PERF][OVERPASS] no encontrado, fallback a Nominatim+Photon');
+    }
 
     final now = DateTime.now();
     final nominatimBlocked = _nominatimBlockedUntil != null && now.isBefore(_nominatimBlockedUntil!);
@@ -321,13 +349,11 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   /// Expands abbreviated Colombian street types and removes the "#" separator
   /// so Nominatim can match OSM data (e.g. "Cr 14 # 45" → "Carrera 14 45").
+  /// Applies globally — not just at the start — so "Calle 72 Cr 50" works.
   static String _expandForNominatim(String query) {
-    // Remove "#" separator
     var result = query.replaceAll(RegExp(r'\s*#\s*'), ' ');
-
-    // Expand street-type abbreviation at the start of the query
-    result = result.replaceFirstMapped(
-      RegExp(r'^(Cr|Cra|Cl|Dg|Tv|Tr|Av|Ak)\b', caseSensitive: false),
+    result = result.replaceAllMapped(
+      RegExp(r'\b(Cr|Cra|Cl|Dg|Tv|Tr|Av|Ak)\b', caseSensitive: false),
       (m) => switch (m[0]!.toLowerCase()) {
         'cr' || 'cra' => 'Carrera',
         'cl' => 'Calle',
@@ -338,8 +364,161 @@ class PlannerNotifier extends Notifier<PlannerState> {
         _ => m[0]!,
       },
     );
-
     return result.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Detects an intersection query. Two patterns supported:
+  ///   1. "Cr 50 # 75" — # notation; cross type is inferred from main type.
+  ///   2. "Calle 72 Cr 50" — both types explicit.
+  /// Returns [mainStreet, crossStreet] (expanded) if detected, null otherwise.
+  static List<String>? _parseIntersection(String query) {
+    final normalized = _normalizeColombianAddress(query);
+
+    // Pattern 1: "Cr 50 # 75" (Colombian # notation)
+    final hashRe = RegExp(
+      r'^(Cr|Cra|Cl|Calle|Carrera|Dg|Diagonal|Tv|Tr|Transversal|Av|Avenida|Ak|Autopista)\s+(\d+[A-Za-z]?)\s*#\s*(\d+[A-Za-z]?)',
+      caseSensitive: false,
+    );
+    final hashMatch = hashRe.firstMatch(normalized.trim());
+    if (hashMatch != null) {
+      final mainExpanded = _expandStreetType(hashMatch.group(1)!);
+      final crossExpanded = _inferCrossType(mainExpanded);
+      return <String>[
+        '$mainExpanded ${hashMatch.group(2)!}',
+        '$crossExpanded ${hashMatch.group(3)!}',
+      ];
+    }
+
+    // Pattern 2: "Calle 72 Cr 50" (two explicit street types)
+    final expanded = _expandForNominatim(normalized);
+    const types = r'(?:Carrera|Calle|Diagonal|Transversal|Avenida|Autopista)';
+    final re = RegExp(
+      r'^(' + types + r'\s+\d+[A-Za-z]?)\s+(?:con\s+)?(' + types + r'\s+\d+[A-Za-z]?)\s*$',
+      caseSensitive: false,
+    );
+    final m = re.firstMatch(expanded);
+    if (m == null) return null;
+    return <String>[m.group(1)!.trim(), m.group(2)!.trim()];
+  }
+
+  static String _expandStreetType(String abbr) {
+    return switch (abbr.toLowerCase()) {
+      'cr' || 'cra' => 'Carrera',
+      'cl' || 'calle' => 'Calle',
+      'dg' || 'diagonal' => 'Diagonal',
+      'tv' || 'tr' || 'transversal' => 'Transversal',
+      'av' || 'avenida' => 'Avenida',
+      'ak' || 'autopista' => 'Autopista',
+      _ => abbr,
+    };
+  }
+
+  /// Infers the cross street type from the main street type.
+  /// Carrera (N-S) crosses with Calle (E-W) and vice versa.
+  static String _inferCrossType(String mainType) {
+    return switch (mainType.toLowerCase()) {
+      'carrera' => 'Calle',
+      'calle' => 'Carrera',
+      'diagonal' => 'Transversal',
+      'transversal' => 'Diagonal',
+      _ => 'Calle',
+    };
+  }
+
+  /// Calls Overpass to find the node where [main] and [cross] streets meet.
+  /// Returns a single NominatimResult or null if not found / timeout.
+  static Future<NominatimResult?> _fetchOverpassIntersection(
+    String main,
+    String cross,
+  ) async {
+    String osmPattern(String street) {
+      final lower = street.toLowerCase();
+      final num = RegExp(r'\d+[A-Za-z]?$').firstMatch(street)?.group(0) ?? '';
+      if (lower.contains('carrera')) return '(Carrera|Cra\\.?|Kr\\.?)\\s*$num';
+      if (lower.contains('calle')) return '(Calle|Cl\\.?)\\s*$num';
+      if (lower.contains('diagonal')) return '(Diagonal|Dg\\.?)\\s*$num';
+      if (lower.contains('transversal')) return '(Transversal|Tv\\.?)\\s*$num';
+      if (lower.contains('avenida')) return '(Avenida|Av\\.?)\\s*$num';
+      return street;
+    }
+
+    const bbox = '10.82,-74.98,11.08,-74.62';
+    final mainPat = osmPattern(main);
+    final crossPat = osmPattern(cross);
+    final query =
+        '[out:json][timeout:8];\n'
+        'way["name"~"$mainPat",i]($bbox)->.a;\n'
+        'way["name"~"$crossPat",i]($bbox)->.b;\n'
+        'node(w.a)(w.b);\n'
+        'out;';
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+      ));
+      // Send as form-encoded map so Dio serializes it correctly
+      final response = await dio.post<Map<String, dynamic>>(
+        'https://overpass-api.de/api/interpreter',
+        data: <String, String>{'data': query},
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          responseType: ResponseType.json,
+        ),
+      );
+      final elements = response.data?['elements'] as List<dynamic>?;
+      if (elements != null && elements.isNotEmpty) {
+        final node = elements.first as Map<String, dynamic>;
+        final lat = (node['lat'] as num).toDouble();
+        final lng = (node['lon'] as num).toDouble();
+        return NominatimResult(
+          displayName: '$main × $cross',
+          lat: lat,
+          lng: lng,
+        );
+      }
+    } catch (e) {
+      debugPrint('[PERF][OVERPASS] error: $e');
+    }
+    return null;
+  }
+
+  /// Nominatim fallback for intersections when Overpass fails.
+  /// Searches the full intersection text with limit=1 and returns 1 result.
+  Future<NominatimResult?> _fetchNominatimIntersection(
+    String main,
+    String cross,
+  ) async {
+    try {
+      final q = '$main $cross Barranquilla Colombia';
+      final response = await ref.read(nominatimDioProvider).get<List<dynamic>>(
+        '/search',
+        queryParameters: <String, dynamic>{
+          'q': q,
+          'format': 'jsonv2',
+          'limit': 1,
+          'countrycodes': 'co',
+          'bounded': 1,
+          'viewbox': '-74.98,11.08,-74.62,10.82',
+        },
+      );
+      final items = response.data ?? const <dynamic>[];
+      if (items.isNotEmpty && items.first is Map) {
+        final parsed = NominatimResult.fromJson(Map<String, dynamic>.from(items.first as Map));
+        final inBounds = parsed.lat >= _minLat && parsed.lat <= _maxLat &&
+            parsed.lng >= _minLng && parsed.lng <= _maxLng;
+        if (inBounds) {
+          // Override the display name with the clean intersection label
+          return NominatimResult(
+            displayName: '$main × $cross',
+            lat: parsed.lat,
+            lng: parsed.lng,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[PERF][NOMINATIM-INTERSECTION] error: $e');
+    }
+    return null;
   }
 
   Future<void> planRoute({
@@ -358,6 +537,8 @@ class PlannerNotifier extends Notifier<PlannerState> {
       destLat: destLat,
       destLng: destLng,
     );
+
+    if (_disposed) return;
 
     switch (result) {
       case Success<List<PlanResult>>(data: final routes):

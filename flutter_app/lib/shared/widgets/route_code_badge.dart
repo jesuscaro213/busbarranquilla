@@ -14,16 +14,18 @@ class RouteCodeBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(maxWidth: 80),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      width: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       decoration: BoxDecoration(
         color: AppColors.forRouteCode(code),
         borderRadius: BorderRadius.circular(6),
       ),
+      alignment: Alignment.center,
       child: Text(
         code,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
         style: AppTextStyles.badge,
       ),
     );

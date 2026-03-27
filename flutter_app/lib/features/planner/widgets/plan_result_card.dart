@@ -79,7 +79,7 @@ class PlanResultCard extends ConsumerWidget {
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
-                      result.nearestStopName ?? AppStrings.notAvailable,
+                      result.nearestStopAddress ?? result.nearestStopName ?? AppStrings.notAvailable,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
@@ -100,27 +100,33 @@ class PlanResultCard extends ConsumerWidget {
               RouteActivityBadge(routeId: result.id),
               const SizedBox(height: 8),
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
                   if (onWait != null) ...<Widget>[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: onWait,
-                        icon: const Icon(Icons.notifications_active_outlined, size: 16),
-                        label: const Text(AppStrings.waitButton),
+                    OutlinedButton.icon(
+                      onPressed: onWait,
+                      icon: const Icon(Icons.notifications_none_outlined, size: 16),
+                      label: const Text(AppStrings.waitButton, style: TextStyle(fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                   ],
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onSelect,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.directions_bus, size: 16),
-                      label: const Text(AppStrings.nearbyBoardButton),
+                  FilledButton.icon(
+                    onPressed: onSelect,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                     ),
+                    icon: const Icon(Icons.directions_bus, size: 16),
+                    label: const Text(AppStrings.nearbyBoardButton),
                   ),
                 ],
               ),

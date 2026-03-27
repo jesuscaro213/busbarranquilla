@@ -355,10 +355,10 @@ class PlannerNotifier extends Notifier<PlannerState> {
   static String _expandForNominatim(String query) {
     var result = query.replaceAll(RegExp(r'\s*#\s*'), ' ');
     result = result.replaceAllMapped(
-      RegExp(r'\b(Cr|Cra|Cl|Dg|Tv|Tr|Av|Ak)\b', caseSensitive: false),
+      RegExp(r'\b(Kr|Kra|Cr|Cra|Cl|Cll|Dg|Tv|Tr|Av|Ak)\b', caseSensitive: false),
       (m) => switch (m[0]!.toLowerCase()) {
-        'cr' || 'cra' => 'Carrera',
-        'cl' => 'Calle',
+        'kr' || 'kra' || 'cr' || 'cra' => 'Carrera',
+        'cl' || 'cll' => 'Calle',
         'dg' => 'Diagonal',
         'tv' || 'tr' => 'Transversal',
         'av' => 'Avenida',
@@ -378,7 +378,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
     // Pattern 1: "Cr 50 # 75" (Colombian # notation)
     final hashRe = RegExp(
-      r'^(Cr|Cra|Cl|Calle|Carrera|Dg|Diagonal|Tv|Tr|Transversal|Av|Avenida|Ak|Autopista)\s+(\d+[A-Za-z]?)\s*#\s*(\d+[A-Za-z]?)',
+      r'^(Kr|Kra|Cr|Cra|Cl|Cll|Calle|Carrera|Dg|Diagonal|Tv|Tr|Transversal|Av|Avenida|Ak|Autopista)\s+(\d+[A-Za-z]?)\s*#\s*(\d+[A-Za-z]?)',
       caseSensitive: false,
     );
     final hashMatch = hashRe.firstMatch(normalized.trim());
@@ -405,8 +405,8 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   static String _expandStreetType(String abbr) {
     return switch (abbr.toLowerCase()) {
-      'cr' || 'cra' => 'Carrera',
-      'cl' || 'calle' => 'Calle',
+      'kr' || 'kra' || 'cr' || 'cra' => 'Carrera',
+      'cl' || 'cll' || 'calle' => 'Calle',
       'dg' || 'diagonal' => 'Diagonal',
       'tv' || 'tr' || 'transversal' => 'Transversal',
       'av' || 'avenida' => 'Avenida',
@@ -428,6 +428,8 @@ class PlannerNotifier extends Notifier<PlannerState> {
   }
 
   /// Calls Overpass to find the node where [main] and [cross] streets meet.
+  /// Uses case-insensitive regex with all common Colombian abbreviations.
+  /// Note: uses [ ]* instead of \s* for POSIX ERE compatibility.
   /// Returns a single NominatimResult or null if not found / timeout.
   static Future<NominatimResult?> _fetchOverpassIntersection(
     String main,
@@ -436,21 +438,20 @@ class PlannerNotifier extends Notifier<PlannerState> {
     String osmPattern(String street) {
       final lower = street.toLowerCase();
       final num = RegExp(r'\d+[A-Za-z]?$').firstMatch(street)?.group(0) ?? '';
-      if (lower.contains('carrera')) return '(Carrera|Cra\\.?|Kr\\.?)\\s*$num';
-      if (lower.contains('calle')) return '(Calle|Cl\\.?)\\s*$num';
-      if (lower.contains('diagonal')) return '(Diagonal|Dg\\.?)\\s*$num';
-      if (lower.contains('transversal')) return '(Transversal|Tv\\.?)\\s*$num';
-      if (lower.contains('avenida')) return '(Avenida|Av\\.?)\\s*$num';
-      return street;
+      if (lower.contains('carrera')) return '^(Carrera|Cra|Cr|Kr|Kra)[ ]*$num\$';
+      if (lower.contains('calle'))   return '^(Calle|Cl|Cll)[ ]*$num\$';
+      if (lower.contains('diagonal'))    return '^(Diagonal|Dg)[ ]*$num\$';
+      if (lower.contains('transversal')) return '^(Transversal|Tv|Tr)[ ]*$num\$';
+      if (lower.contains('avenida'))     return '^(Avenida|Av)[ ]*$num\$';
+      if (lower.contains('autopista'))   return '^(Autopista|Ak)[ ]*$num\$';
+      return '^$street\$';
     }
 
     const bbox = '10.82,-74.98,11.08,-74.62';
-    final mainPat = osmPattern(main);
-    final crossPat = osmPattern(cross);
     final query =
         '[out:json][timeout:8];\n'
-        'way["name"~"$mainPat",i]($bbox)->.a;\n'
-        'way["name"~"$crossPat",i]($bbox)->.b;\n'
+        'way["name"~"${osmPattern(main)}",i]($bbox)->.a;\n'
+        'way["name"~"${osmPattern(cross)}",i]($bbox)->.b;\n'
         'node(w.a)(w.b);\n'
         'out;';
     try {

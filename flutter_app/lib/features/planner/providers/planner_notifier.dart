@@ -202,10 +202,12 @@ class PlannerNotifier extends Notifier<PlannerState> {
       final best = overpassResult ?? nominatimFallback;
       if (best != null) {
         debugPrint('[PERF] intersección encontrada en ${sw.elapsedMilliseconds}ms');
-        // Show the query as-is (what the user typed) instead of the expanded label
         return <NominatimResult>[NominatimResult(displayName: cleanQuery, lat: best.lat, lng: best.lng)];
       }
-      debugPrint('[PERF][OVERPASS] no encontrado, fallback a Nominatim+Photon');
+      // Intersection detected but not found — return empty instead of falling
+      // through to generic search (which returns confusing multi-street results).
+      debugPrint('[PERF][OVERPASS] intersección no encontrada en ${sw.elapsedMilliseconds}ms');
+      return const <NominatimResult>[];
     }
 
     final now = DateTime.now();

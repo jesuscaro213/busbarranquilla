@@ -480,8 +480,14 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                               final destParam = dest != null
                                   ? '&destLat=${dest.lat}&destLng=${dest.lng}'
                                   : '';
+                              final stopParam = result.nearestStopId != null
+                                  ? '&destStopId=${result.nearestStopId}'
+                                  : '';
+                              final projParam = result.projectedLat != null && result.projectedLng != null
+                                  ? '&projLat=${result.projectedLat}&projLng=${result.projectedLng}'
+                                  : '';
                               context.push(
-                                '/trip/confirm?routeId=${result.id}$destParam',
+                                '/trip/confirm?routeId=${result.id}$destParam$stopParam$projParam',
                               );
                             },
                             onWait: () => _startWaiting(

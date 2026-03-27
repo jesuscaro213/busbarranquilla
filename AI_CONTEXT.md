@@ -1405,4 +1405,46 @@ Botón "👁️ Ver ruta" en el dropdown de cada ruta en `AdminRoutes.tsx`. Al h
 **Archivos modificados:**
 - `web/src/pages/admin/AdminRoutes.tsx`: `previewRoute`/`previewLoading` states, `previewMapContainerRef`/`previewMapRef` refs, `useEffect` para init/destroy Leaflet preview map, modal JSX con header+leyenda+mapa
 
-*Última actualización: 2026-03-26 (v65)*
+---
+
+**Bug fix — campo `address` faltaba en query de stops del planificador (2026-03-27):**
+
+`routeController.ts` — la query de `stopsRes` en `planRoute` solo seleccionaba `id, route_id, name, latitude, longitude, stop_order, leg`. El campo `address` no estaba en el SELECT ni en el tipo genérico de TypeScript, causando error de compilación `TS2339: Property 'address' does not exist` en Railway.
+
+Fix: agregar `address` al `SELECT` y al tipo genérico `pool.query<{...; address: string | null}>`.
+
+---
+
+**Bug fix — parada de bajada se mostraba en el leg incorrecto desde el planificador (2026-03-27):**
+
+En rutas con ida/regreso por la misma calle, `BoardingConfirmScreen` re-buscaba la parada de bajada localmente por distancia euclidiana sin filtrar por leg. El backend ya había calculado la parada correcta con su lógica de leg-filtering pero solo enviaba las coordenadas, no el ID.
+
+Fix end-to-end:
+1. Backend `planRoute`: devuelve `nearest_stop_id` junto a `nearest_stop_lat/lng`
+2. `PlanResult`: nuevo campo `nearestStopId: int?`
+3. `planner_screen.dart`: pasa `&destStopId=` en URL a `/trip/confirm`
+4. `app.dart` (router): parsea `destStopId` → `BoardingConfirmScreen`
+5. `BoardingConfirmScreen`: si viene `destStopId` válido lo usa directamente como `autoSelected`; fallback a búsqueda geo-local si es null
+
+---
+
+**Feature — punto de bajada proyectado sobre geometría de ruta (2026-03-27):**
+
+**Problema:** el `DropoffMonitor` disparaba en las coordenadas de la parada, que podían estar más adelante del punto donde el bus pasa más cerca del destino del usuario (overshoot). Si el destino queda fuera de la ruta (casa en un barrio), usar las coords del destino directamente tampoco funciona porque el bus nunca llega ahí.
+
+**Solución:** proyectar el destino sobre la geometría de la ruta en el leg correcto.
+
+Backend (`routeController.ts`):
+- `closestPointOnSegment()`: proyección punto-a-segmento (flat-earth, válida a escala ciudad)
+- `projectOntoLegGeometry()`: usa `turnaround_idx` para aislar el segmento ida o regreso; fallback a geometría completa si falta `turnaround_idx`; fallback a coords de parada si geometry es null
+- `planRoute` incluye `turnaround_idx` en la query de rutas y devuelve `projected_lat/projected_lng`
+
+Flutter:
+- `PlanResult`: `projectedLat: double?`, `projectedLng: double?`
+- `planner_screen.dart` → `app.dart` → `BoardingConfirmScreen`: cadena de params `projLat/projLng`
+- `BoardingConfirmScreen`: tras `startTrip()` exitoso llama `notifier.setDestinationByLatLngFree()`
+- `trip_notifier.dart`: `setDestinationByLatLngFree()` — synthetic stop `id: -1` con coords proyectadas, arranca monitor, cancela `_noDestTimer`, sin cargo de créditos
+
+Fallback: geometry null → coords de parada. Coords proyectadas ausentes → monitor usa parada normal.
+
+*Última actualización: 2026-03-27 (v68)*

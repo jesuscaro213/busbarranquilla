@@ -430,6 +430,50 @@ function minDistToGeometry(lat: number, lng: number, geometry: [number, number][
   return { dist, idx };
 }
 
+// Closest point on segment AB to point P (flat-earth approximation — valid for city scale)
+function closestPointOnSegment(
+  pLat: number, pLng: number,
+  aLat: number, aLng: number,
+  bLat: number, bLng: number
+): [number, number] {
+  const abLat = bLat - aLat, abLng = bLng - aLng;
+  const ab2 = abLat * abLat + abLng * abLng;
+  if (ab2 === 0) return [aLat, aLng];
+  const t = Math.max(0, Math.min(1, ((pLat - aLat) * abLat + (pLng - aLng) * abLng) / ab2));
+  return [aLat + t * abLat, aLng + t * abLng];
+}
+
+// Closest point on the correct leg of a route geometry to a destination point.
+// Uses turnaround_idx to restrict search to the leg where the user is traveling.
+// Falls back to the full geometry if turnaround_idx is missing.
+function projectOntoLegGeometry(
+  destLat: number, destLng: number,
+  geometry: [number, number][],
+  leg: string | null,
+  turnaroundIdx: number | null
+): [number, number] | null {
+  if (geometry.length < 2) return null;
+
+  let seg: [number, number][];
+  if (turnaroundIdx !== null && turnaroundIdx > 0 && turnaroundIdx < geometry.length) {
+    seg = leg === 'regreso'
+      ? geometry.slice(turnaroundIdx)
+      : geometry.slice(0, turnaroundIdx + 1);
+  } else {
+    seg = geometry;
+  }
+  if (seg.length < 2) seg = geometry;
+
+  let bestDist = Infinity;
+  let bestPt: [number, number] = seg[0];
+  for (let i = 0; i < seg.length - 1; i++) {
+    const [cLat, cLng] = closestPointOnSegment(destLat, destLng, seg[i][0], seg[i][1], seg[i + 1][0], seg[i + 1][1]);
+    const d = haversineKm(destLat, destLng, cLat, cLng);
+    if (d < bestDist) { bestDist = d; bestPt = [cLat, cLng]; }
+  }
+  return bestPt;
+}
+
 // Planificador: busca rutas cuya GEOMETRÍA pase cerca del origen y del destino.
 // Mucho más preciso que buscar por paradas — el bus puede pasar a 50 m aunque
 // la parada más cercana esté a 800 m.
@@ -462,10 +506,11 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
       pool.query<{
         id: number; name: string; code: string; frequency_minutes: number | null;
         company_name: string | null; geometry: [number, number][] | null;
+        turnaround_idx: number | null;
       }>(
         `SELECT r.id, r.name, r.code, r.frequency_minutes,
                 COALESCE(c.name, r.company) AS company_name,
-                r.geometry
+                r.geometry, r.turnaround_idx
          FROM routes r
          LEFT JOIN companies c ON c.id = r.company_id
          WHERE r.is_active = true`
@@ -589,15 +634,27 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
           : destDistKm! * 1000
       );
 
+      // Project destination onto route geometry for precise drop-off trigger.
+      // Fallback to nearest_stop coords if geometry is missing.
+      const alightingLeg = alightingStop?.leg ?? null;
+      const projected = geometry
+        ? projectOntoLegGeometry(dLat, dLng, geometry, alightingLeg, route.turnaround_idx)
+        : null;
+      const projectedLat = projected ? projected[0] : (alightingStop ? parseFloat(alightingStop.latitude) : dLat);
+      const projectedLng = projected ? projected[1] : (alightingStop ? parseFloat(alightingStop.longitude) : dLng);
+
       results.push({
         id: route.id,
         name: route.name,
         code: route.code,
         company_name: route.company_name,
-        nearest_stop_name: alightingStop?.name ?? '',
-      nearest_stop_address: alightingStop?.address ?? null,
+        nearest_stop_id:      alightingStop?.id ?? null,
+        nearest_stop_name:    alightingStop?.name ?? '',
+        nearest_stop_address: alightingStop?.address ?? null,
         nearest_stop_lat:  alightingStop ? parseFloat(alightingStop.latitude)  : dLat,
         nearest_stop_lng:  alightingStop ? parseFloat(alightingStop.longitude) : dLng,
+        projected_lat: projectedLat,
+        projected_lng: projectedLng,
         distance_meters:   destM,
         origin_distance_meters: hasOrigin ? originM : null,
         stop_difference: null,

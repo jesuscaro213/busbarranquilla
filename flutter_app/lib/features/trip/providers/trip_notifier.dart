@@ -715,6 +715,23 @@ class TripNotifier extends Notifier<TripState> {
     unawaited(ref.read(tripsRepositoryProvider).updateDestination(lat, lng, label));
   }
 
+  /// Sets the projected drop-off point as the monitor target without charging credits.
+  /// Used by the planner flow: the backend already computed the exact point on the
+  /// route geometry closest to the destination — no stop search needed.
+  void setDestinationByLatLngFree(double lat, double lng, String label) {
+    if (state is! TripActive) return;
+    _noDestTimer?.cancel();
+    _noDestTimer = null;
+    final active = state as TripActive;
+    final syntheticStop = Stop(
+      id: -1, routeId: active.route.id,
+      name: label, latitude: lat, longitude: lng, stopOrder: 0,
+    );
+    _startDropoffMonitor(syntheticStop, active.stops);
+    state = active.copyWith(dropoffPrompt: false, pickedDestLat: lat, pickedDestLng: lng);
+    unawaited(ref.read(tripsRepositoryProvider).updateDestination(lat, lng, label));
+  }
+
   /// Returns the nearest real stop on the route to [lat]/[lng],
   /// filtered to the same leg (ida/regreso) the user is currently on.
   /// Falls back to a synthetic stop only if the route has no stops loaded.

@@ -950,6 +950,32 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
             ),
           ),
 
+          // ── Leg legend (only for routes with ida/regreso) ────────────────
+          if (active.route.turnaroundIdx != null)
+            Positioned(
+              left: 12,
+              bottom: 160,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 4),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _LegendRow(color: AppColors.primary, label: AppStrings.legIda),
+                    const SizedBox(height: 4),
+                    _LegendRow(color: AppColors.routeC, label: AppStrings.legRegreso),
+                  ],
+                ),
+              ),
+            ),
+
           // ── Re-center + change destination buttons ───────────────────────
           Positioned(
             right: 12,
@@ -1126,6 +1152,25 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Leyenda de leg (ida / regreso) ───────────────────────────────────────────
+class _LegendRow extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendRow({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(width: 18, height: 3, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      ],
     );
   }
 }

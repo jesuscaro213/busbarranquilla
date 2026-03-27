@@ -38,11 +38,17 @@ class BoardingConfirmScreen extends ConsumerStatefulWidget {
   final int routeId;
   final double? destLat;
   final double? destLng;
+  final int? destStopId;
+  final double? projectedLat;
+  final double? projectedLng;
 
   const BoardingConfirmScreen({
     required this.routeId,
     this.destLat,
     this.destLng,
+    this.destStopId,
+    this.projectedLat,
+    this.projectedLng,
     super.key,
   });
 
@@ -152,10 +158,13 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
       boardingLeg = nearestToUser.leg;
     }
 
-    // Auto-select nearest stop to the typed destination, restricted to the
-    // boarding leg so we don't pick a stop on the opposite direction.
+    // Auto-select destination stop. Prefer the stop ID from the planner backend
+    // (already computed with correct leg filtering) over a local geo-search,
+    // which can pick the wrong leg when ida and regreso share the same street.
     int? autoSelected;
-    if (widget.destLat != null && widget.destLng != null && stops.isNotEmpty) {
+    if (widget.destStopId != null && stops.any((s) => s.id == widget.destStopId)) {
+      autoSelected = widget.destStopId;
+    } else if (widget.destLat != null && widget.destLng != null && stops.isNotEmpty) {
       final candidates = boardingLeg != null
           ? stops.where((s) => s.leg == boardingLeg).toList()
           : stops;
@@ -246,13 +255,24 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     }
 
     setState(() => _boardingDistanceWarning = null);
-    await ref.read(tripNotifierProvider.notifier).startTrip(
+    final notifier = ref.read(tripNotifierProvider.notifier);
+    await notifier.startTrip(
       widget.routeId,
       destinationStopId: _selectedStopId,
     );
     if (!mounted) return;
     final tripState = ref.read(tripNotifierProvider);
     if (tripState is TripActive) {
+      // Override the monitor target with the projected point on the route geometry
+      // so the alert fires exactly where the bus is closest to the destination,
+      // not at the stop's coordinates.
+      if (widget.projectedLat != null && widget.projectedLng != null) {
+        notifier.setDestinationByLatLngFree(
+          widget.projectedLat!,
+          widget.projectedLng!,
+          _selectedStop?.name ?? 'Destino',
+        );
+      }
       context.go('/trip');
     } else if (tripState is TripError) {
       AppSnackbar.show(context, tripState.message, SnackbarType.error);

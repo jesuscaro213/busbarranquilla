@@ -95,6 +95,9 @@ abstract final class AppStrings {
     'ruta_real': '🗺️ Ruta diferente al mapa',
   };
 
+  static const legIda = 'Ida';
+  static const legRegreso = 'Regreso';
+
   static const prepareToAlight = 'Prepárate para bajar';
   static const prepareToAlightBody = 'Tu parada está a unos 700 m. Ve acercándote a la puerta.';
   static const alightNow = '¡Bájate ya!';

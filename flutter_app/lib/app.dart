@@ -97,10 +97,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           }
           final destLat = double.tryParse(state.uri.queryParameters['destLat'] ?? '');
           final destLng = double.tryParse(state.uri.queryParameters['destLng'] ?? '');
+          final destStopId = int.tryParse(state.uri.queryParameters['destStopId'] ?? '');
+          final projLat = double.tryParse(state.uri.queryParameters['projLat'] ?? '');
+          final projLng = double.tryParse(state.uri.queryParameters['projLng'] ?? '');
           return BoardingConfirmScreen(
             routeId: routeId,
             destLat: destLat,
             destLng: destLng,
+            destStopId: destStopId,
+            projectedLat: projLat,
+            projectedLng: projLng,
           );
         },
       ),

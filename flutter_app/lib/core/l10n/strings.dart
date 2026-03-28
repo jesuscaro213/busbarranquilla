@@ -291,6 +291,7 @@ abstract final class AppStrings {
       'Te avisaremos cuando estés cerca de tu parada. Cuesta 5 créditos por viaje.';
   static const String dropoffPromptDecline = 'No, gracias';
   static const String dropoffPromptAccept = 'Activar (5 créditos)';
+  static const String dropoffPromptBellLabel = 'Activar alerta';
   static const String dropoffDestinationSet = '¡Listo! Te avisaremos al acercarte a ese punto.';
   static const String tripChangeDestination = 'Cambiar destino';
   static const String dropoffConfirmButton = 'Confirmar parada';

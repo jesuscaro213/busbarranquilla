@@ -103,13 +103,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
           Navigator.of(escalateCtx).pop();
         }
       });
-      // The dropoff prompt may already be true when this screen first mounts
-      // (state was set before navigation — ref.listen misses that transition).
-      // Check it once here to ensure the dialog always appears.
       final s = ref.read(tripNotifierProvider);
-      if (s is TripActive && s.dropoffPrompt) {
-        _showDropoffPrompt();
-      }
       if (s is TripActive && s.dropoffAutoPickDestination) {
         ref.read(tripNotifierProvider.notifier).clearDropoffAutoPickDestination();
         _pickDestinationOnMap(ref.read(tripNotifierProvider.notifier));
@@ -158,9 +152,6 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
         }
       }
       if (!next.showDesvioEscalate) _desvioEscalateDialogShown = false;
-      if (next.dropoffPrompt && prev?.dropoffPrompt != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _showDropoffPrompt());
-      }
       if (next.showSuspiciousModal && prev?.showSuspiciousModal != true) {
         if (!_suspiciousDialogShown) {
           _suspiciousDialogShown = true;
@@ -252,43 +243,6 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
               ref.read(tripNotifierProvider.notifier).endTrip();
             },
             child: const Text(AppStrings.tripEndButton),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDropoffPrompt() {
-    final notifier = ref.read(tripNotifierProvider.notifier);
-    final tripState = ref.read(tripNotifierProvider);
-    final hasDestination =
-        tripState is TripActive && tripState.trip.destinationStopId != null;
-
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text(AppStrings.dropoffPromptTitle),
-        content: const Text(AppStrings.dropoffPromptBody),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              notifier.dismissDropoffPrompt();
-            },
-            child: const Text(AppStrings.dropoffPromptDecline),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              if (hasDestination) {
-                notifier.activateDropoffAlerts();
-              } else {
-                notifier.dismissDropoffPrompt();
-                if (mounted) _pickDestinationOnMap(notifier);
-              }
-            },
-            child: const Text(AppStrings.dropoffPromptAccept),
           ),
         ],
       ),
@@ -983,6 +937,34 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                // ── Bell button: activate dropoff notification (opt-in) ──────
+                if (active.dropoffPrompt) ...<Widget>[
+                  FloatingActionButton.small(
+                    heroTag: 'dropoff_bell',
+                    backgroundColor: AppColors.accent,
+                    tooltip: AppStrings.dropoffPromptTitle,
+                    onPressed: () =>
+                        ref.read(tripNotifierProvider.notifier).activateDropoffAlerts(),
+                    child: const Icon(Icons.notifications_active, color: Colors.white),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryDark.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      AppStrings.dropoffPromptBellLabel,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: AppColors.accent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Builder(
                   builder: (context) {
                     final hasDestination = active.trip.destinationStopId != null ||

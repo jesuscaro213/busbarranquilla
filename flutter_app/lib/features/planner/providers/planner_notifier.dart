@@ -81,15 +81,6 @@ class PlannerNotifier extends Notifier<PlannerState> {
     _selectedOrigin = origin;
     _originIsGps = origin.displayName == AppStrings.currentLocationLabel;
 
-    if (state is PlannerResults) {
-      final current = state as PlannerResults;
-      state = current.copyWith(
-        selectedOrigin: origin,
-        originLabel: origin.displayName,
-      );
-      return;
-    }
-
     state = PlannerIdle(
       selectedOrigin: _selectedOrigin,
       selectedDest: _selectedDest,
@@ -127,15 +118,6 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   void setDestination(NominatimResult destination) {
     _selectedDest = destination;
-
-    if (state is PlannerResults) {
-      final current = state as PlannerResults;
-      state = current.copyWith(
-        selectedDest: destination,
-        destLabel: destination.displayName,
-      );
-      return;
-    }
 
     state = PlannerIdle(
       selectedOrigin: _selectedOrigin,

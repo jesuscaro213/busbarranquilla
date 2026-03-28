@@ -429,7 +429,17 @@ class _PlannerScreenState extends ConsumerState<PlannerScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 FilledButton.icon(
-                                  onPressed: () => context.push('/trip/confirm?routeId=${route.id}'),
+                                  onPressed: () {
+                                    final dest = ref
+                                        .read(plannerNotifierProvider.notifier)
+                                        .selectedDest;
+                                    final destParam = dest != null
+                                        ? '&destLat=${dest.lat}&destLng=${dest.lng}'
+                                        : '';
+                                    context.push(
+                                      '/trip/confirm?routeId=${route.id}$destParam',
+                                    );
+                                  },
                                   style: FilledButton.styleFrom(
                                     backgroundColor: AppColors.success,
                                     foregroundColor: Colors.white,

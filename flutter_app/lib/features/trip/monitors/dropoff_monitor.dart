@@ -19,6 +19,13 @@ class DropoffMonitor {
   bool _alerted = false;
   bool _missed = false;
   double? _prevDistMeters;
+  bool _notificationsEnabled;
+
+  bool get notificationsEnabled => _notificationsEnabled;
+
+  /// Enables push + vibration notifications. Called when the user opts in
+  /// (or automatically for premium users). Safe to call multiple times.
+  void enableNotifications() => _notificationsEnabled = true;
 
   DropoffMonitor({
     required this.destination,
@@ -27,7 +34,8 @@ class DropoffMonitor {
     required this.onAlight,
     required this.onMissed,
     this.positionGetter,
-  });
+    bool notificationsEnabled = false,
+  }) : _notificationsEnabled = notificationsEnabled;
 
   void start() {
     _timer?.cancel();

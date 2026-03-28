@@ -120,8 +120,6 @@ class TripNotifier extends Notifier<TripState> {
   AutoResolveMonitor? _autoResolveMonitor;
   DesvioMonitor? _desvioMonitor;
 
-  Stop? _pendingDropoffDestination;
-
   DateTime? _occupancyCooldownEnd;
   final Set<String> _occupancyCredited = <String>{};
   int _reportsCreatedThisTrip = 0;
@@ -636,29 +634,35 @@ class TripNotifier extends Notifier<TripState> {
   Future<void> activateDropoffAlerts({bool autoActivated = false}) async {
     if (state is! TripActive) return;
 
-    final creditResult = await ref.read(creditsRepositoryProvider).spend(<String, dynamic>{
-      'amount': 5,
-      'description': 'Alertas de bajada',
-    });
-    if (creditResult is Failure) {
-      state = (state as TripActive).copyWith(
-        dropoffPrompt: false,
-        reportError: AppStrings.dropoffNoCredits,
-      );
-      return;
+    final authState = ref.read(authNotifierProvider);
+    final isPremium = authState is Authenticated &&
+        (authState.user.hasActivePremium || authState.user.role == 'admin');
+
+    if (!isPremium) {
+      final creditResult = await ref.read(creditsRepositoryProvider).spend(<String, dynamic>{
+        'amount': 5,
+        'description': 'Alertas de bajada',
+      });
+      if (creditResult is Failure) {
+        if (state is TripActive) {
+          state = (state as TripActive).copyWith(
+            dropoffPrompt: false,
+            reportError: AppStrings.dropoffNoCredits,
+          );
+        }
+        return;
+      }
+      _refreshBalance();
     }
 
-    _refreshBalance();
+    // Enable notifications on the running monitor — no need to recreate it.
+    _dropoffMonitor?.enableNotifications();
 
-    state = (state as TripActive).copyWith(
-      dropoffPrompt: false,
-      infoMessage: autoActivated ? AppStrings.dropoffAutoActivated : null,
-    );
-
-    if (_pendingDropoffDestination != null && state is TripActive) {
-      final active = state as TripActive;
-      _startDropoffMonitor(_pendingDropoffDestination!, active.stops);
-      _pendingDropoffDestination = null;
+    if (state is TripActive) {
+      state = (state as TripActive).copyWith(
+        dropoffPrompt: false,
+        infoMessage: autoActivated ? AppStrings.dropoffAutoActivated : null,
+      );
     }
   }
 
@@ -666,7 +670,6 @@ class TripNotifier extends Notifier<TripState> {
     if (state is TripActive) {
       state = (state as TripActive).copyWith(dropoffPrompt: false);
     }
-    _pendingDropoffDestination = null;
   }
 
   /// Sets a destination from a map-picked lat/lng and starts dropoff monitoring.
@@ -723,12 +726,19 @@ class TripNotifier extends Notifier<TripState> {
     _noDestTimer?.cancel();
     _noDestTimer = null;
     final active = state as TripActive;
+    final authState = ref.read(authNotifierProvider);
+    final isPremium = authState is Authenticated &&
+        (authState.user.hasActivePremium || authState.user.role == 'admin');
     final syntheticStop = Stop(
       id: -1, routeId: active.route.id,
       name: label, latitude: lat, longitude: lng, stopOrder: 0,
     );
-    _startDropoffMonitor(syntheticStop, active.stops);
-    state = active.copyWith(dropoffPrompt: false, pickedDestLat: lat, pickedDestLng: lng);
+    _startDropoffMonitor(syntheticStop, active.stops, notificationsEnabled: isPremium);
+    state = active.copyWith(
+      dropoffPrompt: !isPremium,
+      pickedDestLat: lat,
+      pickedDestLng: lng,
+    );
     unawaited(ref.read(tripsRepositoryProvider).updateDestination(lat, lng, label));
   }
 
@@ -797,38 +807,41 @@ class TripNotifier extends Notifier<TripState> {
     state = active.copyWith(dropoffPrompt: false);
   }
 
-  void _startDropoffMonitor(Stop destination, List<Stop> allStops) {
+  void _startDropoffMonitor(Stop destination, List<Stop> allStops, {bool notificationsEnabled = false}) {
     _dropoffMonitor?.dispose();
     _dropoffMonitor = DropoffMonitor(
       destination: destination,
       allStops: allStops,
+      notificationsEnabled: notificationsEnabled,
       onPrepare: () {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.prepare);
-        // Two medium pulses — noticeable but not panic-inducing.
-        _vibrate(
-          pattern: [0, 200, 200, 200],
-          intensities: [0, 180, 0, 180],
-        );
-        unawaited(NotificationService.showAlert(
-          title: AppStrings.prepareToAlight,
-          body: AppStrings.prepareToAlightBody,
-          payload: 'boarding_alert_prepare',
-        ));
+        if (_dropoffMonitor?.notificationsEnabled == true) {
+          _vibrate(
+            pattern: [0, 200, 200, 200],
+            intensities: [0, 180, 0, 180],
+          );
+          unawaited(NotificationService.showAlert(
+            title: AppStrings.prepareToAlight,
+            body: AppStrings.prepareToAlightBody,
+            payload: 'boarding_alert_prepare',
+          ));
+        }
       },
       onAlight: () {
         if (state is! TripActive) return;
         state = (state as TripActive).copyWith(dropoffAlert: DropoffAlert.alight);
-        // Five heavy pulses — urgent "get off now" feel.
-        _vibrate(
-          pattern: [0, 400, 150, 400, 150, 400, 150, 400, 150, 400],
-          intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
-        );
-        unawaited(NotificationService.showAlert(
-          title: AppStrings.alightNow,
-          body: AppStrings.alightNowBody,
-          payload: 'boarding_alert_now',
-        ));
+        if (_dropoffMonitor?.notificationsEnabled == true) {
+          _vibrate(
+            pattern: [0, 400, 150, 400, 150, 400, 150, 400, 150, 400],
+            intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+          );
+          unawaited(NotificationService.showAlert(
+            title: AppStrings.alightNow,
+            body: AppStrings.alightNowBody,
+            payload: 'boarding_alert_now',
+          ));
+        }
       },
       onMissed: () {
         if (state is! TripActive) return;
@@ -1041,20 +1054,14 @@ class TripNotifier extends Notifier<TripState> {
         }
       }
       if (destination != null) {
-        if (isPremium) {
-          _startDropoffMonitor(destination, activeState.stops);
-        } else if (boardingAlertsEnabled) {
-          // User already agreed to pay in a previous trip — charge and activate
-          // automatically without showing the confirmation dialog.
-          _pendingDropoffDestination = destination;
-          unawaited(activateDropoffAlerts(autoActivated: true));
-        } else {
+        // Monitor always starts — notifications enabled for premium/boardingAlerts users,
+        // disabled for free users (they get a bell button to opt in).
+        final notifyEnabled = isPremium || boardingAlertsEnabled;
+        _startDropoffMonitor(destination, activeState.stops, notificationsEnabled: notifyEnabled);
+        if (!notifyEnabled) {
           state = (state as TripActive).copyWith(dropoffPrompt: true);
-          _pendingDropoffDestination = destination;
         }
       }
-    } else if (!isPremium) {
-      // No destination selected — the animated FAB guides the user.
     }
 
     _inactivityMonitor = InactivityMonitor(
@@ -1246,7 +1253,6 @@ class TripNotifier extends Notifier<TripState> {
   void _disposeMonitorsOnly() {
     _dropoffMonitor?.dispose();
     _dropoffMonitor = null;
-    _pendingDropoffDestination = null;
     _occupancyCooldownEnd = null;
     _occupancyCredited.clear();
 

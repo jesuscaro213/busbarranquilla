@@ -263,9 +263,12 @@ class _BoardingConfirmScreenState extends ConsumerState<BoardingConfirmScreen> {
     if (!mounted) return;
     final tripState = ref.read(tripNotifierProvider);
     if (tripState is TripActive) {
-      // Override the monitor target with the projected point on the route geometry
-      // so the alert fires exactly where the bus is closest to the destination,
-      // not at the stop's coordinates.
+      // Only call setDestinationByLatLngFree when a projected point is available
+      // (the closest point on the route geometry to the user's destination).
+      // When only a real stop ID is available, _startMonitors inside startTrip
+      // already set up the monitor correctly — calling setDestinationByLatLngFree
+      // would redundantly overwrite it with a synthetic stop AND clear
+      // destination_stop_id in the DB via updateDestination.
       if (widget.projectedLat != null && widget.projectedLng != null) {
         notifier.setDestinationByLatLngFree(
           widget.projectedLat!,

@@ -65,3 +65,36 @@ El costo de alertas de bajada es **5 créditos** y se cobra **una sola vez** por
 
 - Synthetic stop: `Stop(id: -1, ...)` — indica destino libre sin parada real. Se usa en monitor, no se persiste como `destinationStopId`.
 - `pickedDestLat/pickedDestLng` en `TripActive` — coords del flag verde en el mapa. Para flujo planner: contiene el punto proyectado (dónde bajarse), no el destino final del usuario.
+
+---
+
+## Backend — columna `address` en stops NO existe
+
+La tabla `stops` **no tiene** columna `address`. En algún punto se intentó agregar pero se descartó. No volver a referenciarla en ningún SELECT. `nearest_stop_address` en el response del planificador se devuelve como `null` hardcodeado.
+
+---
+
+## Flutter — PlannerNotifier: flag `_disposed` obligatorio
+
+`planRoute()` hace varios `await` en secuencia. Si el usuario navega hacia atrás durante la búsqueda, el Notifier puede intentar setear `state` sobre un elemento ya desmontado → crash `_lifecycleState != defunct`.
+
+Patrón correcto:
+```dart
+bool _disposed = false;
+
+@override
+PlannerState build() {
+  _disposed = false;
+  ref.onDispose(() => _disposed = true);
+  return const PlannerIdle();
+}
+
+// Antes de cualquier state = ... tras un await:
+if (_disposed) return;
+```
+
+---
+
+## Backend — multer versión correcta
+
+`multer@^2.1.1` no existe en npm. Versión correcta: `^1.4.5-lts.1` + `@types/multer@^1.4.12`. Con multer v1 no se anotan tipos explícitos en `fileFilter` — se infieren solos. Si Docker no recoge cambios en `package.json` tras `--build`, correr `docker-compose down -v` para eliminar el anonymous volume `/app/node_modules`.

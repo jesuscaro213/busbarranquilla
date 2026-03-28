@@ -1397,6 +1397,7 @@ Fix en `backend/src/controllers/routeController.ts`:
 - `active_trip_screen.dart`: pasa `turnaroundIdx: active.route.turnaroundIdx`
 - `boarding_confirm_screen.dart`: pasa `turnaroundIdx: route.turnaroundIdx`
 - `map_screen.dart`: pasa `turnaroundIdx` en los 3 call sites (selectedRoute, waitingRoute, activeTripGeometry)
+- `trip/widgets/route_preview_sheet.dart`: pasa `turnaroundIdx: _turnaroundIdx` (leído de `widget.route.turnaroundIdx` o del fetch de API)
 
 **Feature — "Ver ruta" modal en panel admin (2026-03-26):**
 
@@ -1407,11 +1408,11 @@ Botón "👁️ Ver ruta" en el dropdown de cada ruta en `AdminRoutes.tsx`. Al h
 
 ---
 
-**Bug fix — campo `address` faltaba en query de stops del planificador (2026-03-27):**
+**Bug fix — `address` eliminado de query de stops del planificador (2026-03-28):**
 
-`routeController.ts` — la query de `stopsRes` en `planRoute` solo seleccionaba `id, route_id, name, latitude, longitude, stop_order, leg`. El campo `address` no estaba en el SELECT ni en el tipo genérico de TypeScript, causando error de compilación `TS2339: Property 'address' does not exist` en Railway.
+`routeController.ts` — la query de `stopsRes` en `planRoute` referenciaba `address` en el SELECT y en el tipo genérico, pero la columna nunca existió en la tabla `stops`, causando crash en producción (`column "address" does not exist`). Se descartó la idea de agregar esa columna.
 
-Fix: agregar `address` al `SELECT` y al tipo genérico `pool.query<{...; address: string | null}>`.
+Fix: eliminar `address` del `SELECT` y del tipo genérico. `nearest_stop_address` se devuelve como `null` hardcodeado hasta que haya una fuente real de datos.
 
 ---
 
@@ -1447,4 +1448,30 @@ Flutter:
 
 Fallback: geometry null → coords de parada. Coords proyectadas ausentes → monitor usa parada normal.
 
-*Última actualización: 2026-03-27 (v68)*
+---
+
+**Bug fix — crash `_lifecycleState != defunct` en PlannerNotifier (2026-03-28):**
+
+`planRoute()` en `planner_notifier.dart` llamaba `state = ...` después de un `await` cuando el widget ya había sido desmontado (navegación hacia atrás durante la búsqueda), causando `_ElementLifecycle.defunct` exception.
+
+Fix: campo `bool _disposed = false` inicializado en `build()` y puesto en `true` en `ref.onDispose`. Cualquier `state = ...` tras un `await` en `planRoute()` se guarda con `if (_disposed) return;`.
+
+---
+
+**Fix — multer v2 no existe en npm (2026-03-28):**
+
+`backend/package.json` tenía `"multer": "^2.1.1"` que no existe en npm, causando fallo en `npm ci` en Docker. Además `@types/multer@^2.1.0` conflictuaba con los tipos built-in de multer v2.
+
+Fix:
+- `multer` → `^1.4.5-lts.1`
+- `@types/multer` → `^1.4.12`
+- `resolutionRoutes.ts`: eliminadas anotaciones de tipo explícitas en `fileFilter` (multer v1 las infiere)
+- Si Docker sigue usando node_modules en caché tras cambiar package.json: `docker-compose down -v` elimina el anonymous volume `/app/node_modules`
+
+---
+
+**Fix — RouteCodeBadge con FittedBox para códigos largos (2026-03-28):**
+
+`shared/widgets/route_code_badge.dart`: ancho fijo `62px` con `FittedBox(fit: BoxFit.scaleDown)` en lugar de `overflow: TextOverflow.ellipsis`. Códigos cortos ("A10") se muestran en tamaño normal; códigos anormalmente largos (datos incorrectos en DB) se escalan hacia abajo para caber sin romper el layout.
+
+*Última actualización: 2026-03-28 (v69)*

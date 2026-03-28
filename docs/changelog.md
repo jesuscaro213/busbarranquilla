@@ -218,7 +218,14 @@ App Flutter feature-complete, produciendo APKs de release. Ver `AI_CONTEXT.md` y
 **Feature — polyline bicolor ida/regreso:**
 
 - `RoutePolylineLayer` acepta `turnaroundIdx` opcional: traza segmento de ida en azul y regreso en naranja (`#F97316`)
-- Activo en: `active_trip_screen`, `boarding_confirm_screen`, `map_screen` (selectedRoute, waitingRoute, activeTripGeometry)
+- Activo en: `active_trip_screen`, `boarding_confirm_screen`, `map_screen` (selectedRoute, waitingRoute, activeTripGeometry), `route_preview_sheet` (preview al seleccionar ruta)
+
+**Bug fixes (2026-03-28):**
+
+- **Crash planificador en producción** — `address` referenciada en SELECT de stops pero la columna no existe en DB. Fix: eliminada del SELECT; `nearest_stop_address` devuelve `null` hardcodeado.
+- **Crash `_lifecycleState defunct` en PlannerNotifier** — `state =` llamado tras `await` con widget desmontado. Fix: flag `_disposed` con `ref.onDispose`.
+- **Multer v2 no existe en npm** — `package.json` tenía `^2.1.1`; cambiado a `^1.4.5-lts.1` + `@types/multer@^1.4.12`. Tipos explícitos eliminados de `resolutionRoutes.ts`.
+- **RouteCodeBadge layout roto con códigos largos** — `FittedBox(fit: BoxFit.scaleDown)` dentro de contenedor `width: 62`; el texto escala en lugar de cortar con `...`.
 
 **Pendiente:**
 - Google Play publishing (requiere google-services.json + SHA-1 Firebase)

@@ -95,6 +95,14 @@ if (_disposed) return;
 
 ---
 
+## Flutter — destino del planner persiste con lastSelectedDestProvider
+
+`plannerNotifierProvider` es auto-disposed al navegar fuera del tab Planner (MainShell usa `widget.child`, no IndexedStack). Leer `.selectedDest` del notifier desde `BoardingScreen` o `MapScreen` devuelve `null` porque el notifier ya fue destruido.
+
+**Solución:** `lastSelectedDestProvider = StateProvider<NominatimResult?>((ref) => null)` en `planner_notifier.dart`. No auto-disposed. `setDestination()` escribe aquí además del estado interno. Cualquier pantalla que necesite el destino del planner para construir `destParam` debe leer `lastSelectedDestProvider`, no el notifier.
+
+---
+
 ## Backend — multer versión correcta
 
 `multer@^2.1.1` no existe en npm. Versión correcta: `^1.4.5-lts.1` + `@types/multer@^1.4.12`. Con multer v1 no se anotan tipos explícitos en `fileFilter` — se infieren solos. Si Docker no recoge cambios en `package.json` tras `--build`, correr `docker-compose down -v` para eliminar el anonymous volume `/app/node_modules`.

@@ -918,12 +918,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                     BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 4),
                   ],
                 ),
-                child: Column(
+                child: const Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     _LegendRow(color: AppColors.primary, label: AppStrings.legIda),
-                    const SizedBox(height: 4),
+                    SizedBox(height: 4),
                     _LegendRow(color: AppColors.routeC, label: AppStrings.legRegreso),
                   ],
                 ),

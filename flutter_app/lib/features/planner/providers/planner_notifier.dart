@@ -15,6 +15,10 @@ import 'planner_state.dart';
 
 final selectedPlanRouteProvider = StateProvider<PlanResult?>((ref) => null);
 
+/// Persists the last destination set in the planner across tab navigation.
+/// Not auto-disposed — survives when the planner tab unmounts.
+final lastSelectedDestProvider = StateProvider<NominatimResult?>((ref) => null);
+
 final photonDioProvider = Provider<Dio>((ref) {
   return Dio(BaseOptions(
     baseUrl: 'https://photon.komoot.io',
@@ -118,6 +122,7 @@ class PlannerNotifier extends Notifier<PlannerState> {
 
   void setDestination(NominatimResult destination) {
     _selectedDest = destination;
+    ref.read(lastSelectedDestProvider.notifier).state = destination;
 
     state = PlannerIdle(
       selectedOrigin: _selectedOrigin,

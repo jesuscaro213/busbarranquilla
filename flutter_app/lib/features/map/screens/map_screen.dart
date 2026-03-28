@@ -40,6 +40,7 @@ import '../providers/map_provider.dart';
 import '../providers/map_state.dart';
 import '../providers/waiting_bus_positions_provider.dart';
 import '../providers/waiting_route_provider.dart';
+import '../../planner/providers/planner_notifier.dart';
 import '../../trip/providers/trip_notifier.dart';
 import '../../trip/providers/trip_state.dart';
 import '../widgets/active_feed_bar.dart';
@@ -1087,7 +1088,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       width: double.infinity,
                       height: 56,
                       child: FilledButton.icon(
-                        onPressed: () => context.push('/trip/confirm?routeId=${waitingRoute.id}'),
+                        onPressed: () {
+                          final dest = ref.read(lastSelectedDestProvider);
+                          final destParam = dest != null
+                              ? '&destLat=${dest.lat}&destLng=${dest.lng}'
+                              : '';
+                          context.push('/trip/confirm?routeId=${waitingRoute.id}$destParam');
+                        },
                         style: FilledButton.styleFrom(
                           backgroundColor: AppColors.success,
                           shape: RoundedRectangleBorder(

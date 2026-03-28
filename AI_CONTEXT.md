@@ -1474,4 +1474,12 @@ Fix:
 
 `shared/widgets/route_code_badge.dart`: ancho fijo `62px` con `FittedBox(fit: BoxFit.scaleDown)` en lugar de `overflow: TextOverflow.ellipsis`. Códigos cortos ("A10") se muestran en tamaño normal; códigos anormalmente largos (datos incorrectos en DB) se escalan hacia abajo para caber sin romper el layout.
 
-*Última actualización: 2026-03-28 (v69)*
+---
+
+**Fix — lastSelectedDestProvider: destino persiste al navegar entre tabs (2026-03-27):**
+
+`plannerNotifierProvider` es auto-disposed cuando el usuario navega fuera del tab Planner (MainShell usa `widget.child`, no IndexedStack). Esto causaba "Sin parada de destino" en BoardingConfirmScreen aunque el usuario hubiera elegido destino.
+
+Fix: `lastSelectedDestProvider = StateProvider<NominatimResult?>((ref) => null)` en `planner_notifier.dart` — no auto-disposed. `setDestination()` escribe a este provider además de al estado interno. `boarding_screen.dart` y `map_screen.dart` leen `lastSelectedDestProvider` en lugar del notifier directo para construir `destParam` al navegar a `/trip/confirm`.
+
+*Última actualización: 2026-03-27 (v70)*

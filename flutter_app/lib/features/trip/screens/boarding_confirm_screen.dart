@@ -790,25 +790,15 @@ class _DropoffRow extends StatelessWidget {
             ),
           ),
           if (onPickFromMap != null)
-            IconButton(
-              icon: const Icon(Icons.map_outlined, size: 20),
-              tooltip: AppStrings.boardingPickOnMap,
-              onPressed: onPickFromMap,
-              style: IconButton.styleFrom(
-                padding: const EdgeInsets.all(4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          if (onPickFromMap != null)
-            TextButton(
+            TextButton.icon(
               onPressed: onPickFromMap,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text(AppStrings.tripChangeStop),
+              icon: const Icon(Icons.map_outlined, size: 16),
+              label: const Text(AppStrings.tripChangeStop),
             ),
         ],
       ),

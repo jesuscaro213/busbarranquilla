@@ -14,6 +14,7 @@ import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/route_code_badge.dart';
 import '../../map/providers/waiting_route_provider.dart';
+import '../../planner/providers/planner_notifier.dart';
 import '../widgets/route_preview_sheet.dart';
 
 class BoardingScreen extends ConsumerStatefulWidget {
@@ -117,7 +118,11 @@ class _BoardingScreenState extends ConsumerState<BoardingScreen> {
         route: route,
         onConfirm: () {
           Navigator.of(ctx).pop();
-          context.push('/trip/confirm?routeId=${route.id}');
+          final dest = ref.read(lastSelectedDestProvider);
+          final destParam = dest != null
+              ? '&destLat=${dest.lat}&destLng=${dest.lng}'
+              : '';
+          context.push('/trip/confirm?routeId=${route.id}$destParam');
         },
         onWait: (geometry) {
           Navigator.of(ctx).pop();

@@ -515,8 +515,8 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
          LEFT JOIN companies c ON c.id = r.company_id
          WHERE r.is_active = true`
       ),
-      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number; leg: string | null; address: string | null }>(
-        `SELECT id, route_id, name, latitude, longitude, stop_order, leg, address
+      pool.query<{ id: number; route_id: number; name: string; latitude: string; longitude: string; stop_order: number; leg: string | null }>(
+        `SELECT id, route_id, name, latitude, longitude, stop_order, leg
          FROM stops ORDER BY route_id, stop_order`
       ),
       pool.query<{ route_id: number; last_report_at: string; minutes_ago: number }>(
@@ -650,7 +650,7 @@ export const getPlanRoutes = async (req: Request, res: Response): Promise<void> 
         company_name: route.company_name,
         nearest_stop_id:      alightingStop?.id ?? null,
         nearest_stop_name:    alightingStop?.name ?? '',
-        nearest_stop_address: alightingStop?.address ?? null,
+        nearest_stop_address: null,
         nearest_stop_lat:  alightingStop ? parseFloat(alightingStop.latitude)  : dLat,
         nearest_stop_lng:  alightingStop ? parseFloat(alightingStop.longitude) : dLng,
         projected_lat: projectedLat,
